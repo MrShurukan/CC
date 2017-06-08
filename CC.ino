@@ -32,7 +32,7 @@ void setup() {
   tft.setFont(SmallRusFont);
   tft.setColor(VGA_BLACK);
   tft.setBackColor(VGA_TRANSPARENT);
-  printRus(tft, "Управление котлами версия", CENTER, 12);
+  printRus(tft, ("Управление котлами (версия " + V + ")").c_str(), CENTER, 2);
 }
 
 void loop() {
