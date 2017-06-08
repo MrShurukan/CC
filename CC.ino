@@ -22,24 +22,8 @@ void setup() {
   // put your setup code here, to run once:
   tft.InitLCD(LANDSCAPE);
   tft.clrScr();
-  tft.setColor(VGA_BLACK);
+  tft.setColor(VGA_GRAY);
   tft.fillRect(0,0, tft.getDisplayXSize()-1, tft.getDisplayYSize()-1);
-  tft.setFont(BigRusFont);
-  tft.setColor(VGA_WHITE);
-  tft.setBackColor(VGA_TRANSPARENT);
-  printRus(tft,"АБВГДЕЁЖЗИЙКЛМН", 0, 0,0);
- 
-  printRus(tft,"ОПРСТУФХШЩЬЫЪЭ", 0, 20,0); 
-  printRus(tft,"ЮЯабвгдеёжзийкл", 0, 40,0);
-  printRus(tft,"мнопрстуфхцчшщь", 0, 60,0);
-  printRus(tft,"ыъэюя", 0, 80,0);
-  tft.setFont(SmallRusFont);
-  printRus(tft,"АБВГДЕЁЖЗИЙКЛМН", 0, 100,0);
- 
-  printRus(tft,"ОПРСТУФХШЩЬЫЪЭ", 0, 120,0); 
-  printRus(tft,"ЮЯабвгдеёжзийкл", 0, 140,0);
-  printRus(tft,"мнопрстуфхцчшщь", 0, 160,0);
-  printRus(tft,"ыъэюя123456", 0, 180,0);
 }
 
 void loop() {
