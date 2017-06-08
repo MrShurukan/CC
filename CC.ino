@@ -1,8 +1,10 @@
+#include <Streaming.h>
+
 #include <memorysaver.h>
 #include <UTFT.h>
 #include "RussianFontsRequiredFunctions.h"
 
-#define V "1-alpha"
+String V = "1.0-alpha";
 
 /*  CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием LCD экрана для визуализации и помощи пользователю в ориентировании
 *   Оригинальная программа была так себе (в силу моего незнания языка), но сейчас я хочу сделать эту работу по максимуму хорошо!
@@ -21,15 +23,16 @@ extern uint8_t BigRusFont[];
 UTFT tft(CTE32HR, 38, 39, 40, 41);  //Создаем объект tft с такими выводами (дефолт) и такой моделью
 
 void setup() {
+  Serial.begin(9600);
   // put your setup code here, to run once:
   tft.InitLCD(LANDSCAPE);
   tft.clrScr();
   tft.setColor(VGA_GRAY);
   tft.fillRect(0,0, tft.getDisplayXSize()-1, tft.getDisplayYSize()-1);
   tft.setFont(SmallRusFont);
-  tft.setColor(VGA_WHITE);
+  tft.setColor(VGA_BLACK);
   tft.setBackColor(VGA_TRANSPARENT);
-  printRus(tft,"АБВГДЕЁЖЗИЙКЛМН", 0, 0,0);
+  printRus(tft, "Управление котлами версия", CENTER, 12);
 }
 
 void loop() {
