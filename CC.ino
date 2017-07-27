@@ -8,28 +8,74 @@
 String V = "1.0-alpha";
 
 /*  CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием LCD экрана для визуализации и помощи пользователю в ориентировании
-*   Оригинальная программа была так себе (в силу моего незнания языка), но сейчас я хочу сделать эту работу по максимуму хорошо!
-*   
-*   Создано Ильей Завьяловым (ilyuzhaz@gmail.com), начало разработки: 08.06.2017
-*   
-*   Конец разработки: Все еще в разработке :D
-*
-*
-*   P.S Скорее всего это читать буду только я сам, но ничего) Проект скорее всего займет долгое время :D
+    Оригинальная программа была так себе (в силу моего незнания языка), но сейчас я хочу сделать эту работу по максимуму хорошо!
+
+    Создано Ильей Завьяловым (ilyuzhaz@gmail.com), начало разработки: 27.07.2017
+
+    Конец разработки: Все еще в разработке :D
+
+
+    P.S Скорее всего это читать буду только я сам, но ничего) Проект скорее всего займет долгое время :D
 */
+
+String consolePrefix = "Console >";
+
+UTFT tft(CTE32HR, 38, 39, 40, 41);  //Создаем объект tft с такими выводами (дефолт) и такой моделью
 
 extern uint8_t SmallRusFont[];
 extern uint8_t BigRusFont[];
 extern uint8_t SevenSegNumFontMDS[];
 
-UTFT tft(CTE32HR, 38, 39, 40, 41);  //Создаем объект tft с такими выводами (дефолт) и такой моделью
+bool setFontByName(String name) {    //Для возможности устанавливать шрифт через консоль
+  if (name == "SmallRusFont") tft.setFont(SmallRusFont);
+  else if (name == "BigRusFont") tft.setFont(BigRusFont);
+  else if (name == "SevenSegNumFontMDS") tft.setFont(SevenSegNumFontMDS);
+  else return false;
+  return true;
+}
 
 String consoleMsg = "";
 
+void console(String msg) {    //Функция для вывода сообщения от лица консоли (автоматический перевод строки)
+  Serial << consolePrefix << " " << msg << endl;
+}
+
+
 void checkConsole() {       //Проверка Serial на различные команды для дебага
-  while (Serial.available()) consoleMsg += Serial.read();
+  while (Serial.available()) {
+    char c = Serial.read();
+    consoleMsg += c;
+    delay(1); //Иногда сообщение рвется, дадим небольшую задержку
+  }
   if (consoleMsg != "") {
-    
+    console(consoleMsg);
+    if (consoleMsg.indexOf(' ') != -1) {    //Если команда - это несколько слов
+      String firstWord = consoleMsg.substring(0, consoleMsg.indexOf(' ')); //Первое слово
+      consoleMsg = consoleMsg.substring(consoleMsg.indexOf(' ') + 1); //Обрезаем строку от пробела и до конца, чтобы дальше легче было работать
+      if (firstWord == "getFontSize") {
+        bool b = setFontByName(consoleMsg);   //Переменая bool для определения был ли выбор успешен или нет.
+        if (b) console("The size of " + consoleMsg + " is " + tft.getFontXsize() + " by " + tft.getFontYsize());
+        else console("No such font!");
+      }
+      else console("Sorry, no such command. Use \"help\" to get command list");
+    }
+    else {
+      if (consoleMsg == "clear") {
+        for (int i = 0; i < 15; i++) Serial << endl;
+        console("cleared");
+      }
+      else if (consoleMsg == "help") {
+        Serial << "\n\t******************HELP*******************\n";
+
+        Serial << "\n\t     help - get list of all commands\n";
+        Serial << "\n  clear - \"clears\" the console screen by scrolling it down\n";
+        Serial << "\n   getFontSize *FontName* - get size of the FontName font\n";
+
+        Serial << "\n\t*****************************************\n";
+      }
+      else console("Sorry, no such command. Use \"help\" to get command list");
+    }
+
     consoleMsg = "";
   }
 }
@@ -45,10 +91,10 @@ void setup() {
   Serial << "The screen size is " << tft.getDisplayXSize() << " by " << tft.getDisplayYSize() << " pixels\n";;
   tft.clrScr();
   tft.setColor(VGA_GRAY);
-  tft.fillRect(0,0, tft.getDisplayXSize()-1, tft.getDisplayYSize()-1);
+  tft.fillRect(0, 0, tft.getDisplayXSize() - 1, tft.getDisplayYSize() - 1);
   Serial << "Screen is now ready to draw menus\n";
   /*Дефолтная инициализация завершена*/
-  
+
   tft.setFont(SmallRusFont);
   tft.setColor(VGA_BLACK);
   tft.setBackColor(VGA_TRANSPARENT);
@@ -58,7 +104,7 @@ void setup() {
   tft.setFont(SevenSegNumFontMDS);
   printRus(tft, "25.0", CENTER, 100);
   Serial << "Setup function is done\n\n";
-  Serial << "> Type \"help\" to get command list";
+  console("Type \"help\" to get command list");
 }
 
 void loop() {
