@@ -19,7 +19,7 @@ String V = "1.0-alpha";
 
 extern uint8_t SmallRusFont[];
 extern uint8_t BigRusFont[];
-extern uint8_t ArialNumFontPlus[];
+extern uint8_t SevenSegNumFontMDS[];
 
 UTFT tft(CTE32HR, 38, 39, 40, 41);  //Создаем объект tft с такими выводами (дефолт) и такой моделью
 
@@ -34,6 +34,10 @@ void setup() {
   tft.setColor(VGA_BLACK);
   tft.setBackColor(VGA_TRANSPARENT);
   printRus(tft, String("Управление котлами (версия ") + V + String(")"), CENTER, 2);
+  tft.setFont(BigRusFont);
+  printRus(tft, "Это тест большого шрифта", CENTER, 50);
+  tft.setFont(SevenSegNumFontMDS);
+  printRus(tft, "25.0", CENTER, 100);
 }
 
 void loop() {
