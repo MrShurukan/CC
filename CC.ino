@@ -5,7 +5,7 @@
 #include <Streaming.h>
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "1.0-alpha";
+String V = "1.1-alpha";
 
 /*  CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием LCD экрана для визуализации и помощи пользователю в ориентировании
     Оригинальная программа была так себе (в силу моего незнания языка), но сейчас я хочу сделать эту работу по максимуму хорошо!
@@ -50,26 +50,37 @@ void checkConsole() {       //Проверка Serial на различные к
   if (consoleMsg != "") {
     console(consoleMsg);
     if (consoleMsg.indexOf(' ') != -1) {    //Если команда - это несколько слов
+      
       String firstWord = consoleMsg.substring(0, consoleMsg.indexOf(' ')); //Первое слово
+      
       consoleMsg = consoleMsg.substring(consoleMsg.indexOf(' ') + 1); //Обрезаем строку от пробела и до конца, чтобы дальше легче было работать
-      if (firstWord == "getFontSize") {
+      if (firstWord == "getFontSize") {                                           /*getFontSize*/
+        String prevFont = tft.getFont();
         bool b = setFontByName(consoleMsg);   //Переменая bool для определения был ли выбор успешен или нет.
-        if (b) console("The size of " + consoleMsg + " is " + tft.getFontXsize() + " by " + tft.getFontYsize());
+        if (b) {
+          console("The size of " + consoleMsg + " is " + tft.getFontXsize() + " by " + tft.getFontYsize());
+          setFontByName(prevFont);
+        }
         else console("No such font!");
+      }
+      else if (firstWord == "printSerial1") {                                     /*printSerial1*/
+        console("Sending to Serial1");
+        Serial1.print(consoleMsg);
       }
       else console("Sorry, no such command. Use \"help\" to get command list");
     }
     else {
-      if (consoleMsg == "clear") {
+      if (consoleMsg == "clear") {                                                /*clear*/
         for (int i = 0; i < 15; i++) Serial << endl;
         console("cleared");
       }
-      else if (consoleMsg == "help") {
+      else if (consoleMsg == "help") {                                            /*help*/
         Serial << "\n\t******************HELP*******************\n";
 
         Serial << "\n\t     help - get list of all commands\n";
         Serial << "\n  clear - \"clears\" the console screen by scrolling it down\n";
         Serial << "\n   getFontSize *FontName* - get size of the FontName font\n";
+        Serial << "\n    printSerial1 *message* - print your message to Serial1\n";
 
         Serial << "\n\t*****************************************\n";
       }
@@ -80,9 +91,16 @@ void checkConsole() {       //Проверка Serial на различные к
   }
 }
 
+void checkUserInput() {
+  while(Serial1.available()) {
+    Serial.write(Serial1.read());
+  }
+}
+
 void setup() {
   /*Дефолтная инициализация*/
   Serial.begin(115200);
+  Serial1.begin(115200);
   Serial << "Welcome to CauldronControl by IZ-Software! (v" << V << ")\n\n";
   Serial << "Initializing...";
   // put your setup code here, to run once:
@@ -109,5 +127,6 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-  checkConsole();   //Обязательно проверять консоль и реагировать на нее
+  checkConsole();     //Обязательно проверять консоль и реагировать на нее
+  checkUserInput();   //Не забудем и про ввод с приложения
 }
