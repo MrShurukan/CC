@@ -5,7 +5,7 @@
 #include <Streaming.h>
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "1.1-alpha";
+String V = "2.0-alpha";
 
 /*  CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием LCD экрана для визуализации и помощи пользователю в ориентировании
     Оригинальная программа была так себе (в силу моего незнания языка), но сейчас я хочу сделать эту работу по максимуму хорошо!
@@ -36,56 +36,73 @@ bool setFontByName(String name) {    //Для возможности устан�
 
 String consoleMsg = "", serialMsg = "";
 
-void console(String msg) {    //Функция для вывода сообщения от лица консоли (автоматический перевод строки)
-  Serial << consolePrefix << " " << msg << endl;
+bool consoleHooked = false;   //Если консоль "подцеплена", то весь ее output перенаправляется в ESP вместо Serial и vice versa
+
+void console(String msg, bool isHelpMsg = false) {    //Функция для вывода сообщения от лица консоли (автоматический перевод строки)
+  if (!isHelpMsg) {
+    if (!consoleHooked) Serial << consolePrefix << " " << msg << endl;
+    else Serial1 << "~" << consolePrefix << " " << msg << endl;
+  }
+  else {  //Если это все же список команд (help), то его нужно выводить "сырым"
+    if (!consoleHooked) Serial << msg;
+    else Serial1 << "~" << msg;
+  }
 }
 
+void analizeConsoleMsg(String consoleMsg) {
+  console(consoleMsg);
+  if (consoleMsg.indexOf(' ') != -1) {    //Если команда - это несколько слов
+
+    String firstWord = consoleMsg.substring(0, consoleMsg.indexOf(' ')); //Первое слово
+
+    consoleMsg = consoleMsg.substring(consoleMsg.indexOf(' ') + 1); //Обрезаем строку от пробела и до конца, чтобы дальше легче было работать
+    if (firstWord == "getFontSize") {                                           /*getFontSize*/
+      String prevFont = tft.getFont();
+      bool b = setFontByName(consoleMsg);   //Переменая bool для определения был ли выбор успешен или нет.
+      if (b) {
+        console("The size of " + consoleMsg + " is " + tft.getFontXsize() + " by " + tft.getFontYsize());
+        setFontByName(prevFont);
+      }
+      else console("No such font!");
+    }
+    else if (firstWord == "printSerial1") {                                     /*printSerial1*/
+      console("Sending to Serial1");
+      Serial1.print(consoleMsg);
+    }
+    else console("Sorry, no such command. Use \"help\" to get command list");
+  }
+  else {
+    if (consoleMsg == "clear") {                                                /*clear*/
+      for (int i = 0; i < 15; i++) Serial << endl;
+      console("cleared");
+    }
+    else if (consoleMsg == "help") {                                            /*help*/
+      //console("\n\t##################HELP###################\n", true);
+      
+      delay(20);
+      console("\n\t     help - get list of all commands\n", true);
+      delay(20);
+      console("\n  clear - \"clears\" the console screen by scrolling it down\n", true);
+      delay(20);
+      console("\n   getFontSize #FontName# - get size of the FontName font\n", true);
+      delay(20);
+      console("\n    printSerial1 #message# - print your message to Serial1\n", true);
+      delay(20);
+
+     //console("\n\t#########################################\n", true);
+    }
+    else console("Sorry, no such command. Use \"help\" to get command list");
+  }
+}
 
 void checkConsole() {       //Проверка Serial на различные команды для дебага
   while (Serial.available()) {
     char c = Serial.read();
     consoleMsg += c;
-    delay(1); //Иногда сообщение рвется, дадим небольшую задержку
+    delay(10); //Иногда сообщение рвется, дадим небольшую задержку
   }
   if (consoleMsg != "") {
-    console(consoleMsg);
-    if (consoleMsg.indexOf(' ') != -1) {    //Если команда - это несколько слов
-      
-      String firstWord = consoleMsg.substring(0, consoleMsg.indexOf(' ')); //Первое слово
-      
-      consoleMsg = consoleMsg.substring(consoleMsg.indexOf(' ') + 1); //Обрезаем строку от пробела и до конца, чтобы дальше легче было работать
-      if (firstWord == "getFontSize") {                                           /*getFontSize*/
-        String prevFont = tft.getFont();
-        bool b = setFontByName(consoleMsg);   //Переменая bool для определения был ли выбор успешен или нет.
-        if (b) {
-          console("The size of " + consoleMsg + " is " + tft.getFontXsize() + " by " + tft.getFontYsize());
-          setFontByName(prevFont);
-        }
-        else console("No such font!");
-      }
-      else if (firstWord == "printSerial1") {                                     /*printSerial1*/
-        console("Sending to Serial1");
-        Serial1.print(consoleMsg);
-      }
-      else console("Sorry, no such command. Use \"help\" to get command list");
-    }
-    else {
-      if (consoleMsg == "clear") {                                                /*clear*/
-        for (int i = 0; i < 15; i++) Serial << endl;
-        console("cleared");
-      }
-      else if (consoleMsg == "help") {                                            /*help*/
-        Serial << "\n\t******************HELP*******************\n";
-
-        Serial << "\n\t     help - get list of all commands\n";
-        Serial << "\n  clear - \"clears\" the console screen by scrolling it down\n";
-        Serial << "\n   getFontSize *FontName* - get size of the FontName font\n";
-        Serial << "\n    printSerial1 *message* - print your message to Serial1\n";
-
-        Serial << "\n\t*****************************************\n";
-      }
-      else console("Sorry, no such command. Use \"help\" to get command list");
-    }
+    analizeConsoleMsg(consoleMsg);
 
     consoleMsg = "";
   }
@@ -96,22 +113,37 @@ void serialCommand(String command) {
 }
 
 void checkESPInput() {
-  while(Serial1.available()) {
+  while (Serial1.available()) {
     char c = Serial1.read();
     if (c != '*') serialMsg += c;
     else break;
-    delay(1); //Иногда сообщение рвется, дадим небольшую задержку
+    delay(10); //Иногда сообщение рвется, дадим небольшую задержку
   }
   if (serialMsg != "") {
-    
+    Serial << "Recieved data from ESP: " << serialMsg << endl;
+    if (serialMsg == "hook") {
+      console("Console was hooked");
+      consoleHooked = true;
+      console("Hooked Console! At your service!");   //Отправляем сообщение еще раз, на этот раз уже в телефон
+    }
+    else if (serialMsg == "unhook") {
+      console("Console is now unhooked");
+      consoleHooked = false;
+      console("Console was unhooked");              //Отправляем сообщение еще раз, на этот раз уже в Serial
+    }
+    else if (serialMsg.indexOf("Console ") != -1) {                //Если сообщение - консольный запрос (содержит слово Console внутри)
+      serialMsg = serialMsg.substring(serialMsg.indexOf(' ') + 1); //Удаляем слово Console и пробел после него из сообщения
+      analizeConsoleMsg(serialMsg);
+    }
+
     serialMsg = "";
   }
 }
 
 void setup() {
   /*Дефолтная инициализация*/
-  Serial.begin(115200);
-  Serial1.begin(115200);
+  Serial.begin(9600);
+  Serial1.begin(9600);
   Serial << "Welcome to CauldronControl by IZ-Software! (v" << V << ")\n\n";
   Serial << "Initializing...";
   // put your setup code here, to run once:
