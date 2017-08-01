@@ -103,11 +103,6 @@ void checkESPInput() {
     delay(1); //Иногда сообщение рвется, дадим небольшую задержку
   }
   if (serialMsg != "") {
-    /*if (serialMsg == "?") {
-      Serial1 << "!";
-      Serial << "Connection with ESP was (re)established!"; 
-    }
-    else if (serialMsg == "ConnectionCheck") serialCommand("confirm");*/
     
     serialMsg = "";
   }

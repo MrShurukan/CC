@@ -67,11 +67,6 @@ void checkForMainDevice() {
   }
   
   if (serialMsg != "") {
-    /*if (serialMsg == "!") {
-      SerialConnected = true;
-      recievedCheckResponse = true;
-    }
-    else if (serialMsg == "confirm") recievedCheckResponse = true;*/
     
   }
 }
@@ -92,21 +87,6 @@ void analizeMessage(String request) {
 }
 
 void loop() {
-  // Соединение с основным устройством
-  /*if (!SerialConnected && (millis() % 500 == 0)) {
-    mySerial.print("?");
-    Serial << "Attempting a connection...\n";
-  }
-  else if (SerialConnected && (millis() % 5000 == 0) && recievedCheckResponse) {
-    console("ConnectionCheck");
-    recievedCheckResponse = false;
-  }
-  else {
-    Serial << "Lost connection with main device!";
-    SerialConnected = false;
-  }*/
-
-
   client = server.available();
   if (client) {
     Serial.println("Client connected.");
