@@ -53,42 +53,70 @@ void setup() {
 
 WiFiClient client;
 
-void analizeMessage(String message) {
-  if (message != "") Serial << "Recieved command: " << message << endl;
-  if (message == "c") {
-    client.print("connected");
-    Serial << "Sent: connected";
+void console(String message) {        //Отправка сообщения в mySerial с "*" окончанием
+  mySerial.print(message + "*");
+}
+
+void checkForMainDevice() {
+  String serialMsg = "";
+  while (mySerial.available()) {
+    char c = mySerial.read();
+    if (c != '*') serialMsg += c; 
+    else break; //Если вдруг пришло несколько сообщений, а мы не успели прочесть
+    delay(1); //Иногда сообщение рвется, дадим небольшую задержку
   }
-  if (message == "turnOn") digitalWrite(led, HIGH);
-  if (message == "turnOff") digitalWrite(led, LOW);
+  
+  if (serialMsg != "") {
+    /*if (serialMsg == "!") {
+      SerialConnected = true;
+      recievedCheckResponse = true;
+    }
+    else if (serialMsg == "confirm") recievedCheckResponse = true;*/
+    
+  }
+}
+
+void analizeMessage(String request) {
+  if (request != "") Serial << "Recieved command: " << request << endl;
+  if (request == "c") {
+    client.print("connected");
+    Serial << "Sent: connected\n";
+  }
+  else if (request.indexOf("Console") != -1) {              //Если сообщение - консольный запрос (содержит слово Console внутри)
+    request = request.substring(request.indexOf(' ') + 1);  //Удаляем слово Console из сообщения
+
+    if (request == "hook") {      //Запрос "подцепить" консоль
+      console("hook");
+    }
+  }
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  while (mySerial.available()) {
-    Serial.write(mySerial.read());
+  // Соединение с основным устройством
+  /*if (!SerialConnected && (millis() % 500 == 0)) {
+    mySerial.print("?");
+    Serial << "Attempting a connection...\n";
   }
-  while (Serial.available()) {
-    mySerial.write(Serial.read());
+  else if (SerialConnected && (millis() % 5000 == 0) && recievedCheckResponse) {
+    console("ConnectionCheck");
+    recievedCheckResponse = false;
   }
+  else {
+    Serial << "Lost connection with main device!";
+    SerialConnected = false;
+  }*/
+
+
   client = server.available();
   if (client) {
     Serial.println("Client connected.");
 
     while (client.connected()) {
-
-      while (mySerial.available()) {
-        Serial.print(mySerial.read());
-      }
-      while (Serial.available()) {
-        mySerial.write(Serial.read());
-      }
-
       String message = "";
       while (client.available()) {
         char c = client.read();
-        if (c != '\n' && c != '*') message += c;
-        if (c == '*') break; //Если вдруг пришло несколько сообщений, а мы не успели прочесть
+        if (c != '*') message += c;
+        else break; //Если вдруг пришло несколько сообщений, а мы не успели прочесть
       }
       analizeMessage(message);
     }

@@ -34,7 +34,7 @@ bool setFontByName(String name) {    //Для возможности устан�
   return true;
 }
 
-String consoleMsg = "";
+String consoleMsg = "", serialMsg = "";
 
 void console(String msg) {    //Функция для вывода сообщения от лица консоли (автоматический перевод строки)
   Serial << consolePrefix << " " << msg << endl;
@@ -91,9 +91,25 @@ void checkConsole() {       //Проверка Serial на различные к
   }
 }
 
-void checkUserInput() {
+void serialCommand(String command) {
+  Serial1 << command + "*";
+}
+
+void checkESPInput() {
   while(Serial1.available()) {
-    Serial.write(Serial1.read());
+    char c = Serial1.read();
+    if (c != '*') serialMsg += c;
+    else break;
+    delay(1); //Иногда сообщение рвется, дадим небольшую задержку
+  }
+  if (serialMsg != "") {
+    /*if (serialMsg == "?") {
+      Serial1 << "!";
+      Serial << "Connection with ESP was (re)established!"; 
+    }
+    else if (serialMsg == "ConnectionCheck") serialCommand("confirm");*/
+    
+    serialMsg = "";
   }
 }
 
@@ -128,5 +144,5 @@ void setup() {
 void loop() {
   // put your main code here, to run repeatedly:
   checkConsole();     //Обязательно проверять консоль и реагировать на нее
-  checkUserInput();   //Не забудем и про ввод с приложения
+  checkESPInput();   //Не забудем и про ввод с приложения
 }
