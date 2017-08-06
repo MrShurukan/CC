@@ -1,0 +1,4 @@
+Serial.println(SD_CHIP_SELECT_PIN);  //53
+Serial.println(SPI_MOSI_PIN);	     //51
+Serial.println(SPI_MISO_PIN);	     //50
+Serial.println(SPI_SCK_PIN);	     //52

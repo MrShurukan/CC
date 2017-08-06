@@ -33,7 +33,7 @@ void setup() {
   // Connect to WiFi network
   Serial.println();
   Serial.println();
-  Serial.print("Connecting to ");
+  Serial.print("Подключаюсь к ");
   Serial.println(ssid);
 
   WiFi.config(ip, gateway, subnet);
@@ -44,12 +44,12 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("");
-  Serial.println("WiFi connected");
+  Serial.println("WiFi подключен!");
 
   //Start the server
-  Serial << "Starting server\n";
+  Serial << "Запускаю сервер\n";
   server.begin();
-  Serial << "Server started! IP is ";
+  Serial << "Сервер запущен на ";
 
   // Print the IP address
   Serial.println(WiFi.localIP());
@@ -70,7 +70,7 @@ void checkMainDevice() {
   }
 
   if (serialMsg != "") {
-    Serial << "Recieved data from Main Device: " << serialMsg << endl;
+    Serial << "Данные от основного устройства: " << serialMsg << endl;
     if (serialMsg.indexOf('~') != -1) {
       //serialMsg = serialMsg.substring(1);     //Получаем всю команду со второй позиции (после ~)
       client.print(serialMsg);                  //Отправляем вывод консоли к клиенту
@@ -80,7 +80,7 @@ void checkMainDevice() {
 }
 
 void analizeClientMessage(String request) {
-  if (request != "") Serial << "Recieved command: " << request << endl;
+  if (request != "") Serial << "Получена команда: " << request << endl;
   if (request == "c") {
     client.print("connected");
   }
@@ -96,7 +96,7 @@ void loop() {
   checkMainDevice();
   client = server.available();
   if (client) {
-    Serial.println("Client connected.");
+    Serial.println("Клиент подсоединился.");
 
     while (client.connected()) {
       checkMainDevice();
@@ -108,7 +108,7 @@ void loop() {
       }
       analizeClientMessage(message);
     }
-    Serial.println("Client disconnected.");
+    Serial.println("Клиент отсоединился.");
     msgMainDevice("unhook");    //На случай, если соединение разорвалось
     client.stop();
   }
