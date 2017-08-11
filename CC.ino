@@ -5,7 +5,7 @@
 #include <Streaming.h>
 #include <SPI.h>
 #include <SD.h>
-File file;        //Переменная для работы с файлом с SD карты
+File myFile;        //Переменная для работы с файлом с SD карты
 
 #include <DS1302RTC.h>
 #include <TimeLib.h>
@@ -21,7 +21,7 @@ tmElements_t tm;
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "3.0-alpha";
+String V = "3.1-alpha";
 
 /*  CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием LCD экрана для визуализации и помощи пользователю в ориентировании
     Оригинальная программа была так себе (в силу моего незнания языка), но сейчас я хочу сделать эту работу по максимуму хорошо!
@@ -43,6 +43,10 @@ extern uint8_t BigRusFont[];
 extern uint8_t SevenSegNumFontMDS[];
 extern uint8_t Grotesk16x32[];
 
+String months[12] = {                                                                   //Соответсвия названия месяца к его номеру
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"
+};
+
 bool setFontByName(String name) {    //Для возможности устанавливать шрифт через консоль
   if (name == "SmallRusFont") tft.setFont(SmallRusFont);
   else if (name == "BigRusFont") tft.setFont(BigRusFont);
@@ -55,6 +59,12 @@ String consoleMsg = "", serialMsg = "";
 
 bool consoleHooked = false;   //Если консоль "подцеплена", то весь ее output перенаправляется в ESP вместо Serial и vice versa
 
+String formatValue(int v) {
+  return (v < 10 ? "0" + String(v) : String(v));
+}
+
+#define RAW true
+
 void console(String msg, bool isRaw = false) {    //Функция для вывода сообщения от лица консоли (автоматический перевод строки)
   if (!isRaw) {
     if (!consoleHooked) Serial << consolePrefix << " " << msg << endl;
@@ -66,11 +76,42 @@ void console(String msg, bool isRaw = false) {    //Функция для выв
   }
 }
 
+#define LOG_NAME (formatValue(day()) + months[month() - 1] + year() % 100 + ".log")
+
+void openLogFile(int type = FILE_READ) {
+  if (type == FILE_WRITE) myFile = SD.open(LOG_NAME, FILE_WRITE);
+  else myFile = SD.open(LOG_NAME);
+  delay(1000);
+}
+
+#define WITH_SERIAL true
+#define NO_SERIAL false
+//Типы сообщений в LOG
+#define CRITICAL "*КРИТИЧЕСКОЕ* "
+#define WARNING "Внимание! "
+#define CONSOLE (consolePrefix + " ")
+
+void log(String msg, bool copyToSerial = false, String type = "") {               //Функция для лога в SD карту. Есть возможность писать/не писать в Serial, а также выводить различные типы сообщений (в том числе и консольные)
+  myFile << "[" << formatValue(hour()) << ":" << formatValue(minute()) << ":" << formatValue(second()) << "] ";  //Вывести время лога
+  if (type != "") myFile << type;     //Если указан тип сообщения, то его нужно вывести
+  myFile << msg << endl;
+
+  if (copyToSerial) {
+    if (type != CONSOLE) Serial << msg << endl;
+    else console(msg);
+  }
+}
+
 void analizeConsoleMsg(String consoleMsg) {
   console(consoleMsg);
   if (consoleMsg.indexOf(' ') != -1) {    //Если команда - это несколько слов
 
     String firstWord = consoleMsg.substring(0, consoleMsg.indexOf(' ')); //Первое слово
+
+    if (firstWord != "log" && firstWord != "printLog") {     //Не нужно писать "Выполнение команды", если ты сам выводишь свое сообщение в LOG или хочешь его вывести
+      if (!consoleHooked) log("Выполнение команды: " + consoleMsg);
+      else log("Выполнение команды (с моб. устройства): " + consoleMsg);
+    }
 
     consoleMsg = consoleMsg.substring(consoleMsg.indexOf(' ') + 1); //Обрезаем строку от пробела и до конца, чтобы дальше легче было работать
     if (firstWord == "getFontSize") {                                           /*getFontSize*/
@@ -86,25 +127,81 @@ void analizeConsoleMsg(String consoleMsg) {
       console("Отправка в Serial1");
       Serial1.print(consoleMsg);
     }
+    else if (firstWord == "printLog") {                                         /*printLog*/
+      int amount = consoleMsg.toInt();
+      if (amount != 0) {
+        log("Запрос вывести последние " + String(amount) + "сообщений", WITH_SERIAL, CONSOLE);
+        /*WIP*/
+      }
+      else {
+        log("Запрос вывести все сообщения за день");
+        myFile.close();
+        openLogFile();                                 //Открываем для чтения
+        if (myFile) {
+          console("Файл открыт успешно");
+          String LOG = "";
+          if (consoleHooked) delay(300);
+          console("\nДоступно: " + String(myFile.available()) + " байт\n", RAW);                                //Отступ перед выводом лога
+          while (myFile.available()) {            //Двойной while нужен, чтобы разделять отправку сообщений delay-ями, для мобильного устройства
+            while (myFile.available()) {                   //Если есть данные для чтения из открытого файла
+              char c = myFile.read();
+              LOG += c;                                    //Читаем очередной байт из файла и сохраняем в String
+              if (c == '\n' && consoleHooked) break;
+            }
+            console(LOG, RAW);
+            LOG = "";
+            if (consoleHooked) delay(400);
+          }
+          myFile.close();
+          console("--Конец--",RAW);
+        }
+        else console("Ошибка открытия файла");
+        openLogFile(FILE_WRITE);                      //Открываем для записи опять
+        if (!myFile) console("Ошибка открытия для записи");
+      }
+    }
+    else if (firstWord == "log") {                                              /*log*/
+      log(consoleMsg, NO_SERIAL, "User: ");
+    }
     else console("Такой команды нет. Используйте \"help\", чтобы получить список команд");
   }
-  else {
+  else {              //Если команда - одно слово
+    if (!consoleHooked) log("Выполнение команды: " + consoleMsg);
+    else log("Выполнение команды (с моб. устройства): " + consoleMsg);
+
     if (consoleMsg == "clear") {                                                /*clear*/
-      for (int i = 0; i < 15; i++) console("\n", true);
+      for (int i = 0; i < 15; i++) console("\n", RAW);
       console("Очищено");
+    }
+    else if (consoleMsg == "clearLog") {                                        /*clearLog*/
+      myFile.close();
+      SD.remove(LOG_NAME);        //Закрываем файл и удаляем его, тем самым очищая
+      openLogFile(FILE_WRITE);    //Создания файла
+    }
+    else if (consoleMsg == "printTime") {                                       /*printTime*/
+      console("Системное время: [" + formatValue(day()) + " " + months[month() - 1] + " " + year() + "] " +
+              formatValue(hour()) + ":" + formatValue(minute()) + ":" + formatValue(second()));
     }
     else if (consoleMsg == "help") {                                            /*help*/
       //console("\n\t##################HELP###################\n", true);
 
-      delay(20);
-      console("\n\t     help - получить список всех команд\n", true);
-      delay(20);
-      console("\n    clear - \"очищает\" экран консоли, прокручивая ее вниз\n", true);
-      delay(20);
-      console("\n  getFontSize #FontName# - получить размер шрифта FontName\n", true);
-      delay(20);
-      console("\n printSerial1 #message# - отправить ваше сообщение в Serial1\n", true);
-      delay(20);
+      int delayTime = (consoleHooked ? 400 : 0);
+
+      console("\n                help - получить список всех команд\n", RAW);
+      delay(delayTime);
+      console("\n       clear - \"очищает\" экран консоли, прокручивая ее вниз\n", RAW);
+      delay(delayTime);
+      console("\n      getFontSize #FontName# - получить размер шрифта FontName\n", RAW);
+      delay(delayTime);
+      console("\n    printSerial1 #message# - отправить ваше сообщение в Serial1\n", RAW);
+      delay(delayTime);
+      console("\n printLog #amount# - вывести amount последних сообщений (0 для всех за день)\n", RAW);
+      delay(delayTime);
+      console("\n     log #message# - вывести в LOG свое сообщение (с пометкой USER)\n", RAW);
+      delay(delayTime);
+      console("\n                 clearLog - очищает LOG этого дня\n", RAW);
+      delay(delayTime);
+      console("\n           printTime - вывести полное текущее системное время\n", RAW);
 
       //console("\n\t#########################################\n", true);
     }
@@ -139,14 +236,14 @@ void checkESPInput() {
   if (serialMsg != "") {
     Serial << "Данные от ESP: " << serialMsg << endl;
     if (serialMsg == "hook") {
-      console("Консоль была подцеплена!");
+      log("Консоль была перенаправлена!", WITH_SERIAL, CONSOLE);
       consoleHooked = true;
-      console("Подцепленная консоль! К вашим услугам!");   //Отправляем сообщение еще раз, на этот раз уже в телефон
+      console("Перенаправленная консоль! К вашим услугам!");   //Отправляем сообщение еще раз, на этот раз уже в телефон
     }
     else if (serialMsg == "unhook") {
-      console("Консоль была отцеплена");
+      console("Консоль была подключена назад");
       consoleHooked = false;
-      console("Консоль была отцеплена");              //Отправляем сообщение еще раз, на этот раз уже в Serial
+      log("Консоль была подключена назад", WITH_SERIAL, CONSOLE);              //Отправляем сообщение еще раз, на этот раз уже в Serial
     }
     else if (serialMsg.indexOf("Console ") != -1) {                //Если сообщение - консольный запрос (содержит слово Console внутри)
       serialMsg = serialMsg.substring(serialMsg.indexOf(' ') + 1); //Удаляем слово Console и пробел после него из сообщения
@@ -155,10 +252,6 @@ void checkESPInput() {
 
     serialMsg = "";
   }
-}
-
-String formatValue(int v) {
-  return (v < 10 ? "0" + String(v) : String(v));  
 }
 
 void redrawCurrentTime() {
@@ -178,6 +271,12 @@ void updateTime() {
     if (second() == 0) {      //Каждую новую минуту
       redrawCurrentTime();    //Рисовать новое текущее время в углу
     }
+
+    if (hour() == 0 && minute() == 0 && second() == 0) {      //Если это новый день, то
+      myFile.close();
+      openLogFile(FILE_WRITE);   //Открываем новый файл для записи лога
+      log("Привет, сегодня новый день!", WITH_SERIAL);
+    }
   }
 }
 
@@ -194,7 +293,7 @@ void setup() {
   Serial << "Размер экрана: " << tft.getDisplayXSize() << " на " << tft.getDisplayYSize() << " пикселей\n\n";;
   tft.clrScr();
   /*tft.setColor(VGA_GRAY);
-  tft.fillRect(0, 0, tft.getDisplayXSize() - 1, tft.getDisplayYSize() - 1);*/
+    tft.fillRect(0, 0, tft.getDisplayXSize() - 1, tft.getDisplayYSize() - 1);*/
   tft.fillScr(VGA_GRAY);
   Serial << "Экран готов к отрисовке\n\n";
   /*Дефолтная инициализация завершена*/
@@ -215,10 +314,18 @@ void setup() {
     tft.setColor(VGA_BLACK);
     tft.setBackColor(VGA_TRANSPARENT);
     /*printRus(tft, "Не удалось инициализировать", CENTER, tft.getDisplayYSize() / 2 - 8);
-    printRus(tft, "SD карту", CENTER, tft.getDisplayYSize() / 2 + 8);*/
+      printRus(tft, "SD карту", CENTER, tft.getDisplayYSize() / 2 + 8);*/
   }
-  Serial << "Готово!\n";
+  else Serial << "Готово!\n";
 
+  openLogFile(FILE_WRITE);
+  if (myFile) {
+    Serial << "Файл для записи лога открылся корректно (" + LOG_NAME + ")\n";
+    /*myFile << "Был произведен перезапуск в " +
+      formatValue(hour()) + ":" + formatValue(minute()) + ":" + formatValue(second()) + "\n";*/
+    log("Система перезагружена!", NO_SERIAL, WARNING);
+  }
+  else Serial << "Не удалось открыть файл для записи лога (" + LOG_NAME + ")\n";
   /*Инициализация SD карты завершена*/
 
 
@@ -231,11 +338,11 @@ void setup() {
   printRus(tft, "Это тест большого шрифта", CENTER, 50);
   tft.setFont(SevenSegNumFontMDS);
   printRus(tft, "25.0", CENTER, 100);
-  
+
   redrawCurrentTime();        //Время в углу
   /*Начальная отрисовка завершена*/
 
-  Serial << "Функция Setup завершена!\n\n";
+  Serial << "\nФункция Setup завершена!\n\n";
   console("Введите \"help\" для списка команд");
 }
 
