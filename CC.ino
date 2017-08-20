@@ -21,7 +21,7 @@ tmElements_t tm;
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "3.1-alpha";
+String V = "1.0-beta";
 
 /*  CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием LCD экрана для визуализации и помощи пользователю в ориентировании
     Оригинальная программа была так себе (в силу моего незнания языка), но сейчас я хочу сделать эту работу по максимуму хорошо!
@@ -43,6 +43,28 @@ extern uint8_t BigRusFont[];
 extern uint8_t SevenSegNumFontMDS[];
 extern uint8_t Grotesk16x32[];
 
+#define POD 0
+#define OBR 1
+#define TPOL 2
+#define UL 3
+#define DOM 4
+#define SETPOD 5
+#define SETDOM 6
+
+float T[7] {
+  45.0,   //POD
+  20.0,   //OBR
+  20.0,   //TPOL
+  20.0,   //UL
+  19.0,   //DOM
+  50.0,   //SETPOD
+  21.0,   //SETDOM
+};
+
+int Tcoord[7] {50, 80, 110, 220, 250, 50, 250}; //Кординаты по Y-ку всех строк (а именно самих чисел), у SETPOD и SETDOM координата совпадает с POD и DOM соответсвенно
+
+float Tprev[7];
+
 String months[12] = {                                                                   //Соответсвия названия месяца к его номеру
   "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"
 };
@@ -58,7 +80,8 @@ bool setFontByName(String name) {    //Функция для возможнос�
 
 String consoleMsg = "", serialMsg = "";
 
-bool consoleHooked = false;   //Если консоль "подцеплена", то весь ее output перенаправляется в ESP вместо Serial и vice versa
+bool consoleHooked = false;     //Если консоль "подцеплена", то весь ее output перенаправляется в ESP вместо Serial и vice versa
+bool mainScreenUpdates = true;  //Иногда нужно останавливать обновление экрана (например, вход в меню)
 
 String formatValue(int v) {
   return (v < 10 ? "0" + String(v) : String(v));
@@ -210,7 +233,7 @@ void executeInConsole(String consoleMsg, bool hidden = false) {                 
       int coord[2] = { 0 };   //Координаты (X,Y)
       int pos = consoleMsg.indexOf(",");
       String text = consoleMsg.substring(0, pos);    //Сам текст
-      
+
       String num = "";
       for (int i = pos + 1, j = 0; i < consoleMsg.length(); i++) {
         char c = consoleMsg[i];
@@ -220,10 +243,25 @@ void executeInConsole(String consoleMsg, bool hidden = false) {                 
           num = "";
         }
       }
-      
+
       console("TEXT: " + text + ", X: " + String(coord[0]) + ", Y: " + String(coord[1]));
-    
+
       printRus(tft, text, coord[0], coord[1]);        //Вывод текста на экран
+    }
+    else if (firstWord == "changeValue") {                                      /*changeValue*/
+      int pos = consoleMsg.indexOf(',');
+      String name = consoleMsg.substring(0, pos);
+      float value = consoleMsg.substring(pos + 1).toFloat();
+      //console("Value: " + String(value, 1) + " substring: " + consoleMsg.substring(pos + 1));
+
+      if (name == "tpod") T[POD] = value;
+      else if (name == "tobr") T[OBR] = value;
+      else if (name == "ttpol") T[TPOL] = value;
+      else if (name == "tul") T[UL] = value;
+      else if (name == "tdom") T[DOM] = value;
+      else if (name == "tsetpod") T[SETPOD] = value;
+      else if (name == "tsetdom") T[SETDOM] = value;
+      else console("Такая переменная не внесена в список");
     }
     else console("Такой команды нет. Используйте \"help\", чтобы получить список команд");
   }
@@ -240,6 +278,18 @@ void executeInConsole(String consoleMsg, bool hidden = false) {                 
     else if (consoleMsg == "printTime") {                                       /*printTime*/
       console("Системное время: [" + formatValue(day()) + " " + months[month() - 1] + " " + year() + "] " +
               formatValue(hour()) + ":" + formatValue(minute()) + ":" + formatValue(second()));
+    }
+    else if (consoleMsg == "printTemp") {                                       /*printTemp*/
+      int delayTime = (consoleHooked ? 400 : 0);
+      console("\nПодача     = " + String(T[POD], 1) + " из " + String(T[SETPOD], 1) + "\n", RAW);
+      delay(delayTime);
+      console("Обратка    = " + String(T[OBR], 1) + "\n", RAW);
+      delay(delayTime);
+      console("Теплый пол = " + String(T[TPOL], 1) + "\n", RAW);
+      delay(delayTime);
+      console("Улица      = " + String(T[UL], 1) + "\n", RAW);
+      delay(delayTime);
+      console("Дом        = " + String(T[DOM], 1) + " из " + String(T[SETDOM], 1) + "\n", RAW);
     }
     else if (consoleMsg == "help") {                                            /*help*/
       //console("\n\t##################HELP###################\n", true);
@@ -264,9 +314,13 @@ void executeInConsole(String consoleMsg, bool hidden = false) {                 
       delay(delayTime);
       console("\n       setTime #ГГ,М,Д,Ч,М,С# - выставить новое системное время\n", RAW);
       delay(delayTime);
-      console("\n         selectFont #FontName# - выбрать шрифт FontName (DEBUG)\n", RAW);
+      console("\n         selectFont #FontName# - выбрать шрифт FontName\n", RAW);        //DEBUG COMMAND
       delay(delayTime);
-      console("\n            drawText #Text,X,Y# - вывести Text на (X,Y) (DEBUG)\n", RAW);
+      console("\n            drawText #Text,X,Y# - вывести Text на (X,Y)\n", RAW);        //DEBUG COMMAND
+      delay(delayTime);
+      console("\n changeValue #Name,Value# - меняет значение переменной Name (если она прописана)\n", RAW);        //DEBUG COMMAND
+      delay(delayTime);
+      console("\n            printTemp - выводит все температуры в консоль\n", RAW);
 
       //console("\n\t#########################################\n", true);
     }
@@ -319,12 +373,10 @@ void checkESPInput() {
   }
 }
 
-void redrawCurrentTime() {
-  tft.setFont(Grotesk16x32);
-  tft.setColor(VGA_GRAY);
-  tft.fillRect(tft.getDisplayXSize() - tft.getFontXsize() * 5 - 5, tft.getDisplayYSize() - tft.getFontYsize() - 3, tft.getDisplayXSize() - 1, tft.getDisplayYSize());
+void redrawTime() {
+  tft.setFont(Grotesk16x32);      
   tft.setColor(VGA_BLACK);
-  tft.setBackColor(VGA_TRANSPARENT);
+  tft.setBackColor(VGA_GRAY);
   tft.print(formatValue(hour()) + ":" + formatValue(minute()), tft.getDisplayXSize() - tft.getFontXsize() * 5 - 5, tft.getDisplayYSize() - tft.getFontYsize() - 3);
 }
 
@@ -334,7 +386,7 @@ void updateTime() {
     tLast = t;
     //Если время изменилось на секунду, то:
     if (second() == 0) {      //Каждую новую минуту
-      redrawCurrentTime();    //Рисовать новое текущее время в углу
+      redrawTime();     //Рисовать новое текущее время в углу
     }
 
     if (hour() == 0 && minute() == 0 && second() == 0) {      //Если это новый день, то
@@ -342,6 +394,60 @@ void updateTime() {
       openLogFile(FILE_WRITE);   //Открываем новый файл для записи лога
       log("Привет, сегодня новый день!", WITH_SERIAL);
     }
+  }
+}
+
+#define REDRAW true
+
+void updateMainScreen(bool redraw = false) {
+  if (redraw) {             //Рисуем весь главный экран
+    //Версия и заглавие
+    tft.setFont(SmallRusFont);
+    tft.setColor(VGA_BLACK);
+    tft.setBackColor(VGA_TRANSPARENT);
+    printRus(tft, String("Управление котлами (версия ") + V + String(")"), CENTER, 2);
+    //Температуры
+    tft.setFont(BigRusFont);
+    printRus(tft, "Подача     = " + String(T[POD], 1) + " из " + String(T[SETPOD], 1), 30, 50);
+    printRus(tft, "Обратка    = " + String(T[OBR], 1), 30, 80);
+    printRus(tft, "Теплый пол = " + String(T[TPOL], 1), 30, 110);
+    printRus(tft, "Улица      = " + String(T[UL], 1), 30, 220);
+    printRus(tft, "Дом        = " + String(T[DOM], 1) + " из " + String(T[SETDOM], 1), 30, 250);
+
+    //Время в углу
+    tft.setFont(Grotesk16x32);
+    tft.setColor(VGA_BLACK);
+    tft.setBackColor(VGA_GRAY);
+    tft.print(formatValue(hour()) + ":" + formatValue(minute()), tft.getDisplayXSize() - tft.getFontXsize() * 5 - 5, tft.getDisplayYSize() - tft.getFontYsize() - 3);
+
+    //Теперь заполняем предыдущие значения переменных
+    for (int i = 0; i < 7; i++) Tprev[i] = T[i];      //7 - размер массива
+  }
+  else {              //Если это не полная перерисовка, а именно обновление
+    //Проверка всех температур
+    for (int i = 0; i < 7; i++) {                     //7 - размер массива
+      if (Tprev[i] != T[i]) {
+        tft.setFont(BigRusFont);
+        tft.setColor(VGA_GRAY);
+        int offset;
+        if (i < 5)            //Если это любая температура, кроме двух SET-ов
+          offset = 13 * 16;     //13 - количество символов до первого числа, 16 - ширина шрифта
+        else                  //Если это SETPOD или SETDOM
+          offset = 21 * 16;     //21 - количество символов до первого числа, 16 - ширина шрифта
+
+        int startX = 30 + offset;  //30 - начальная сдвижка текста
+        //Закрашиваем необходимое число (Пока пробуем просто использовать цвет фона)
+        //tft.fillRect(startX, Tcoord[i], startX + 16 * 4, Tcoord[i] + 16);  //16 - высота и ширина шрифта
+        //Выводим обновленное число
+        tft.setColor(VGA_BLACK);
+        tft.setBackColor(VGA_GRAY);
+        printRus(tft, String(T[i], 1), startX, Tcoord[i]);
+
+        //Запоминаем новое значение
+        Tprev[i] = T[i];
+      }
+    }
+    //WIP
   }
 }
 
@@ -395,16 +501,8 @@ void setup() {
 
 
   /*Начальная отрисовка*/
-  tft.setFont(SmallRusFont);
-  tft.setColor(VGA_BLACK);
-  tft.setBackColor(VGA_TRANSPARENT);
-  printRus(tft, String("Управление котлами (версия ") + V + String(")"), CENTER, 2);
-  tft.setFont(BigRusFont);
-  printRus(tft, "Это тест большого шрифта", CENTER, 50);
-  tft.setFont(SevenSegNumFontMDS);
-  printRus(tft, "25.0", CENTER, 100);
-
-  redrawCurrentTime();        //Время в углу
+  updateMainScreen(REDRAW);         //Параметр REDRAW (true) сообщает, что нужно перерисовать все, не смотря на то, что все и так уже отрисовано
+  Serial << "Начальный экран отрисован успешно!";
   /*Начальная отрисовка завершена*/
 
   Serial << "\nФункция Setup завершена!\n\n";
@@ -413,9 +511,11 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
+  if (mainScreenUpdates) updateMainScreen();   //Обновление главного экрана при изменении каких-то переменных (всегда свежая инфа на экране)
+
   checkConsole();     //Обязательно проверять консоль и реагировать на нее
   checkESPInput();    //Не забудем и про ввод с приложения
 
 
-  updateTime();       //Обработка событий по времени
+  updateTime();       //Обновление времени и обработка событий по времени
 }
