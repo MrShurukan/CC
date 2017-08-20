@@ -9,11 +9,11 @@ SoftwareSerial mySerial(5, 4, false, 256); // RX, TX (1, 2)
 const char* ssid = "D.Misha3";
 const char* password = "nissan6585";
 
-IPAddress ip(192, 168, 1, 181);
+IPAddress ip(192, 168, 1, 177);
 IPAddress gateway(192, 168, 1, 150);
 IPAddress subnet(255, 255, 255, 0);
 
-WiFiServer server(1337);
+WiFiServer server(3000);
 
 void msgMainDevice(String message) {        //Отправка сообщения в mySerial с "*" окончанием
   mySerial.print(message + "*");

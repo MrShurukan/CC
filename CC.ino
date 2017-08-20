@@ -47,10 +47,11 @@ String months[12] = {                                                           
   "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"
 };
 
-bool setFontByName(String name) {    //Для возможности устанавливать шрифт через консоль
+bool setFontByName(String name) {    //Функция для возможности устанавливать шрифт через консоль
   if (name == "SmallRusFont") tft.setFont(SmallRusFont);
   else if (name == "BigRusFont") tft.setFont(BigRusFont);
   else if (name == "SevenSegNumFontMDS") tft.setFont(SevenSegNumFontMDS);
+  else if (name == "Grotesk16x32") tft.setFont(Grotesk16x32);
   else return false;
   return true;
 }
@@ -102,8 +103,16 @@ void log(String msg, bool copyToSerial = false, String type = "") {             
   }
 }
 
-void analizeConsoleMsg(String consoleMsg) {
-  console(consoleMsg);
+#define HIDDEN true
+
+void executeInConsole(String consoleMsg, bool hidden = false) {                 //Функция для исполнения команды в консоли
+  if (!hidden) {
+    console(consoleMsg);
+
+    if (!consoleHooked) log("Выполнение команды: " + consoleMsg);
+    else log("Выполнение команды (с моб. устройства): " + consoleMsg);
+  }
+
   if (consoleMsg.indexOf(' ') != -1) {    //Если команда - это несколько слов
 
     String firstWord = consoleMsg.substring(0, consoleMsg.indexOf(' ')); //Первое слово
@@ -146,14 +155,14 @@ void analizeConsoleMsg(String consoleMsg) {
             while (myFile.available()) {                   //Если есть данные для чтения из открытого файла
               char c = myFile.read();
               LOG += c;                                    //Читаем очередной байт из файла и сохраняем в String
-              if (c == '\n' && consoleHooked) break;
+              if (c == '\n') break;
             }
             console(LOG, RAW);
             LOG = "";
             if (consoleHooked) delay(400);
           }
           myFile.close();
-          console("--Конец--",RAW);
+          console("--Конец--\n", RAW);
         }
         else console("Ошибка открытия файла");
         openLogFile(FILE_WRITE);                      //Открываем для записи опять
@@ -163,12 +172,62 @@ void analizeConsoleMsg(String consoleMsg) {
     else if (firstWord == "log") {                                              /*log*/
       log(consoleMsg, NO_SERIAL, "User: ");
     }
+    else if (firstWord == "setTime") {                                          /*setTime*/
+      int date[6];          //Массив для хранения всей даты
+      String num = "";           //Цифры, которые мы будем один за одним добавлять, чтобы создавать число
+      //Разбиваем строку на отдельные int элементы
+      for (int i = 0, j = 0; i < consoleMsg.length(); i++) {
+        char c = consoleMsg[i];
+        if (c != ',') num += c;
+        if (c == ',' || i == consoleMsg.length() - 1) {
+          date[j++] = num.toInt();
+          num = "";
+        }
+      }
+      //Записываем в tm переменную
+      tm.Year = y2kYearToTm(date[0]);
+      tm.Month = date[1];
+      tm.Day = date[2];
+      tm.Hour = date[3];
+      tm.Minute = date[4];
+      tm.Second = date[5];
+      t = makeTime(tm);
+      //Выставляем время
+      if (RTC.set(t) == 0) { //Успешно
+        setTime(t);
+        console("Время было выставлено успешно!");
+        executeInConsole("printTime", HIDDEN);
+      }
+      else console("Не удалось выставить время!");
+    }
+    else if (firstWord == "selectFont") {                                       /*selectFont*/
+      bool b = setFontByName(consoleMsg);
+      if (b)     //Если такой шрифт есть
+        console("Шрифт выбран успешно");
+      else console("Такого шрифта нет в системе!");
+    }
+    else if (firstWord == "drawText") {                                         /*drawText*/
+      int coord[2] = { 0 };   //Координаты (X,Y)
+      int pos = consoleMsg.indexOf(",");
+      String text = consoleMsg.substring(0, pos);    //Сам текст
+      
+      String num = "";
+      for (int i = pos + 1, j = 0; i < consoleMsg.length(); i++) {
+        char c = consoleMsg[i];
+        if (c != ',') num += c;
+        if (c == ',' || i == consoleMsg.length() - 1) {
+          coord[j++] = num.toInt();
+          num = "";
+        }
+      }
+      
+      console("TEXT: " + text + ", X: " + String(coord[0]) + ", Y: " + String(coord[1]));
+    
+      printRus(tft, text, coord[0], coord[1]);        //Вывод текста на экран
+    }
     else console("Такой команды нет. Используйте \"help\", чтобы получить список команд");
   }
   else {              //Если команда - одно слово
-    if (!consoleHooked) log("Выполнение команды: " + consoleMsg);
-    else log("Выполнение команды (с моб. устройства): " + consoleMsg);
-
     if (consoleMsg == "clear") {                                                /*clear*/
       for (int i = 0; i < 15; i++) console("\n", RAW);
       console("Очищено");
@@ -202,6 +261,12 @@ void analizeConsoleMsg(String consoleMsg) {
       console("\n                 clearLog - очищает LOG этого дня\n", RAW);
       delay(delayTime);
       console("\n           printTime - вывести полное текущее системное время\n", RAW);
+      delay(delayTime);
+      console("\n       setTime #ГГ,М,Д,Ч,М,С# - выставить новое системное время\n", RAW);
+      delay(delayTime);
+      console("\n         selectFont #FontName# - выбрать шрифт FontName (DEBUG)\n", RAW);
+      delay(delayTime);
+      console("\n            drawText #Text,X,Y# - вывести Text на (X,Y) (DEBUG)\n", RAW);
 
       //console("\n\t#########################################\n", true);
     }
@@ -216,7 +281,7 @@ void checkConsole() {       //Проверка Serial на различные к
     delay(10); //Иногда сообщение рвется, дадим небольшую задержку
   }
   if (consoleMsg != "") {
-    analizeConsoleMsg(consoleMsg);
+    executeInConsole(consoleMsg);
 
     consoleMsg = "";
   }
@@ -247,7 +312,7 @@ void checkESPInput() {
     }
     else if (serialMsg.indexOf("Console ") != -1) {                //Если сообщение - консольный запрос (содержит слово Console внутри)
       serialMsg = serialMsg.substring(serialMsg.indexOf(' ') + 1); //Удаляем слово Console и пробел после него из сообщения
-      analizeConsoleMsg(serialMsg);
+      executeInConsole(serialMsg);
     }
 
     serialMsg = "";
@@ -323,7 +388,7 @@ void setup() {
     Serial << "Файл для записи лога открылся корректно (" + LOG_NAME + ")\n";
     /*myFile << "Был произведен перезапуск в " +
       formatValue(hour()) + ":" + formatValue(minute()) + ":" + formatValue(second()) + "\n";*/
-    log("Система перезагружена!", NO_SERIAL, WARNING);
+    log("Система была перезагружена!", NO_SERIAL, WARNING);
   }
   else Serial << "Не удалось открыть файл для записи лога (" + LOG_NAME + ")\n";
   /*Инициализация SD карты завершена*/
