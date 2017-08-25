@@ -1,5 +1,6 @@
 #include <Streaming.h>
 
+#include <EEPROM.h>
 #include <memorysaver.h>
 #include <UTFT.h>
 #include <Streaming.h>
@@ -21,7 +22,7 @@ tmElements_t tm;
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "1.0-beta";
+String V = "1.1-beta";
 
 /*  CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием LCD экрана для визуализации и помощи пользователю в ориентировании
     Оригинальная программа была так себе (в силу моего незнания языка), но сейчас я хочу сделать эту работу по максимуму хорошо!
@@ -38,10 +39,19 @@ String consolePrefix = "Console >";
 
 UTFT tft(CTE32HR, 38, 39, 40, 41);  //Создаем объект tft с такими выводами (дефолт) и такой моделью
 
+//Шрифты
 extern uint8_t SmallRusFont[];
 extern uint8_t BigRusFont[];
 extern uint8_t SevenSegNumFontMDS[];
 extern uint8_t Grotesk16x32[];
+extern uint8_t SmallSymbolFont[];
+//Картинки
+extern unsigned short electroIcon[0x960];
+extern unsigned short gasIcon[0x960];
+extern unsigned short autoIcon[0x960];
+extern unsigned short manualIcon[0x960];
+extern unsigned short checkIcon[0x640];
+extern unsigned short crossIcon[0x640];
 
 #define POD 0
 #define OBR 1
@@ -69,11 +79,42 @@ String months[12] = {                                                           
   "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"
 };
 
+//Пины для энкодера
+#define pin_A 10     //CLK
+#define pin_B 9      //DT
+#define pin_btn 8    //SW
+//Переменные для хранения значений энкодера
+int encoder_A;
+int encoder_B;
+int encoder_A_prev = 0;
+//Две кнопки - переключение котла и режима работы
+#define switchCauldronPin 3    //Газ   |  Электро
+#define switchModePin 2        //Авто  |  Ручной
+//Светодиоды
+#define redLed A13
+#define blueLed A14
+#define greenLed A15
+
+//Переменные для настройки работы котла
+int prevValues[3];      //Предыдущие значения последующих переменных (для обновления на экране). Снизу указаны индексы
+int hyst = EEPROM.read(0);  //prevValues[0]
+//Переменные для хранения выбраного котла и режима. В EEPROM сохраняются цифрами 1 и 0 (0 - gas/auto; 1 - electro/manual)
+#define ELECTRO 1
+#define GAS 0
+#define AUTO 1
+#define MANUAL 0
+int choosenCauldron = EEPROM.read(1); //prevValues[1]
+int choosenMode = EEPROM.read(2); //prevValues[2]
+//Переменная для хранении данных о состоянии подключения к "маленькому" устройству
+bool isConnected;
+
+
 bool setFontByName(String name) {    //Функция для возможности устанавливать шрифт через консоль
   if (name == "SmallRusFont") tft.setFont(SmallRusFont);
   else if (name == "BigRusFont") tft.setFont(BigRusFont);
   else if (name == "SevenSegNumFontMDS") tft.setFont(SevenSegNumFontMDS);
   else if (name == "Grotesk16x32") tft.setFont(Grotesk16x32);
+  else if (name == "SmallSymbolFont") tft.setFont(SmallSymbolFont);
   else return false;
   return true;
 }
@@ -132,8 +173,8 @@ void executeInConsole(String consoleMsg, bool hidden = false) {                 
   if (!hidden) {
     console(consoleMsg);
 
-    if (!consoleHooked) log("Выполнение команды: " + consoleMsg);
-    else log("Выполнение команды (с моб. устройства): " + consoleMsg);
+    if (!consoleHooked) log("Выполнение команды (с Serial): " + consoleMsg);
+    else log("Выполнение команды: " + consoleMsg);
   }
 
   if (consoleMsg.indexOf(' ') != -1) {    //Если команда - это несколько слов
@@ -141,8 +182,8 @@ void executeInConsole(String consoleMsg, bool hidden = false) {                 
     String firstWord = consoleMsg.substring(0, consoleMsg.indexOf(' ')); //Первое слово
 
     if (firstWord != "log" && firstWord != "printLog") {     //Не нужно писать "Выполнение команды", если ты сам выводишь свое сообщение в LOG или хочешь его вывести
-      if (!consoleHooked) log("Выполнение команды: " + consoleMsg);
-      else log("Выполнение команды (с моб. устройства): " + consoleMsg);
+      if (!consoleHooked) log("Выполнение команды  (с Serial): " + consoleMsg);
+      else log("Выполнение команды: " + consoleMsg);
     }
 
     consoleMsg = consoleMsg.substring(consoleMsg.indexOf(' ') + 1); //Обрезаем строку от пробела и до конца, чтобы дальше легче было работать
@@ -251,16 +292,33 @@ void executeInConsole(String consoleMsg, bool hidden = false) {                 
     else if (firstWord == "changeValue") {                                      /*changeValue*/
       int pos = consoleMsg.indexOf(',');
       String name = consoleMsg.substring(0, pos);
-      float value = consoleMsg.substring(pos + 1).toFloat();
+      String value = consoleMsg.substring(pos + 1);
+      float flValue = consoleMsg.substring(pos + 1).toFloat();
       //console("Value: " + String(value, 1) + " substring: " + consoleMsg.substring(pos + 1));
 
-      if (name == "tpod") T[POD] = value;
-      else if (name == "tobr") T[OBR] = value;
-      else if (name == "ttpol") T[TPOL] = value;
-      else if (name == "tul") T[UL] = value;
-      else if (name == "tdom") T[DOM] = value;
-      else if (name == "tsetpod") T[SETPOD] = value;
-      else if (name == "tsetdom") T[SETDOM] = value;
+      if (name == "tpod") T[POD] = flValue;
+      else if (name == "tobr") T[OBR] = flValue;
+      else if (name == "ttpol") T[TPOL] = flValue;
+      else if (name == "tul") T[UL] = flValue;
+      else if (name == "tdom") T[DOM] = flValue;
+      else if (name == "tsetpod") T[SETPOD] = flValue;
+      else if (name == "tsetdom") T[SETDOM] = flValue;
+      else if (name == "mainScreenUpdates") mainScreenUpdates = bool(value);
+      else if (name == "hyst") {
+        hyst = value.toInt();
+        EEPROM.update(0, hyst);
+      }
+      else if (name == "choosenCauldron") {
+        choosenCauldron = (value == "gas" ? GAS : ELECTRO);
+        //console("value: " + value + "; bool expr: " + String((value == "gas" ? GAS : ELECTRO)));
+        EEPROM.update(1, choosenCauldron);
+      }
+      else if (name == "choosenMode") {
+        choosenMode = (value == "auto" ? AUTO : MANUAL);
+        //console("value: " + value + "; bool expr: " + String((value == "auto" ? AUTO : MANUAL)));
+        EEPROM.update(2, choosenMode);
+      }
+      else if (name == "isConnected") isConnected = value.toInt();
       else console("Такая переменная не внесена в список");
     }
     else console("Такой команды нет. Используйте \"help\", чтобы получить список команд");
@@ -280,7 +338,7 @@ void executeInConsole(String consoleMsg, bool hidden = false) {                 
               formatValue(hour()) + ":" + formatValue(minute()) + ":" + formatValue(second()));
     }
     else if (consoleMsg == "printTemp") {                                       /*printTemp*/
-      int delayTime = (consoleHooked ? 400 : 0);
+      int delayTime = (consoleHooked ? 200 : 0);
       console("\nПодача     = " + String(T[POD], 1) + " из " + String(T[SETPOD], 1) + "\n", RAW);
       delay(delayTime);
       console("Обратка    = " + String(T[OBR], 1) + "\n", RAW);
@@ -374,7 +432,7 @@ void checkESPInput() {
 }
 
 void redrawTime() {
-  tft.setFont(Grotesk16x32);      
+  tft.setFont(Grotesk16x32);
   tft.setColor(VGA_BLACK);
   tft.setBackColor(VGA_GRAY);
   tft.print(formatValue(hour()) + ":" + formatValue(minute()), tft.getDisplayXSize() - tft.getFontXsize() * 5 - 5, tft.getDisplayYSize() - tft.getFontYsize() - 3);
@@ -408,7 +466,7 @@ void updateMainScreen(bool redraw = false) {
     printRus(tft, String("Управление котлами (версия ") + V + String(")"), CENTER, 2);
     //Температуры
     tft.setFont(BigRusFont);
-    printRus(tft, "Подача     = " + String(T[POD], 1) + " из " + String(T[SETPOD], 1), 30, 50);
+    printRus(tft, "Подача     = " + String(T[POD], 1) + " из " + String(T[SETPOD], 0) + "(~" + String(hyst) + ")" , 30, 50);
     printRus(tft, "Обратка    = " + String(T[OBR], 1), 30, 80);
     printRus(tft, "Теплый пол = " + String(T[TPOL], 1), 30, 110);
     printRus(tft, "Улица      = " + String(T[UL], 1), 30, 220);
@@ -420,6 +478,12 @@ void updateMainScreen(bool redraw = false) {
     tft.setBackColor(VGA_GRAY);
     tft.print(formatValue(hour()) + ":" + formatValue(minute()), tft.getDisplayXSize() - tft.getFontXsize() * 5 - 5, tft.getDisplayYSize() - tft.getFontYsize() - 3);
 
+    //Картинки и иконки
+    tft.drawBitmap(325, 80, 50, 48, (choosenCauldron == GAS ? gasIcon : electroIcon));
+    tft.drawBitmap(395, 80, 50, 48, (choosenMode == AUTO ? autoIcon : manualIcon));
+
+    tft.drawBitmap(20, 265, 40, 40, (isConnected == true ? checkIcon : crossIcon));
+
     //Теперь заполняем предыдущие значения переменных
     for (int i = 0; i < 7; i++) Tprev[i] = T[i];      //7 - размер массива
   }
@@ -428,7 +492,6 @@ void updateMainScreen(bool redraw = false) {
     for (int i = 0; i < 7; i++) {                     //7 - размер массива
       if (Tprev[i] != T[i]) {
         tft.setFont(BigRusFont);
-        tft.setColor(VGA_GRAY);
         int offset;
         if (i < 5)            //Если это любая температура, кроме двух SET-ов
           offset = 13 * 16;     //13 - количество символов до первого числа, 16 - ширина шрифта
@@ -436,19 +499,99 @@ void updateMainScreen(bool redraw = false) {
           offset = 21 * 16;     //21 - количество символов до первого числа, 16 - ширина шрифта
 
         int startX = 30 + offset;  //30 - начальная сдвижка текста
-        //Закрашиваем необходимое число (Пока пробуем просто использовать цвет фона)
-        //tft.fillRect(startX, Tcoord[i], startX + 16 * 4, Tcoord[i] + 16);  //16 - высота и ширина шрифта
         //Выводим обновленное число
         tft.setColor(VGA_BLACK);
         tft.setBackColor(VGA_GRAY);
-        printRus(tft, String(T[i], 1), startX, Tcoord[i]);
+        if (i != SETPOD) printRus(tft, String(T[i], 1), startX, Tcoord[i]);
+        else printRus(tft, String(T[i], 0), startX, Tcoord[i]);
 
         //Запоминаем новое значение
         Tprev[i] = T[i];
       }
     }
+
+    if (prevValues[0] != hyst) {
+      tft.setFont(BigRusFont);
+      tft.setBackColor(VGA_GRAY);
+      tft.setColor(VGA_BLACK);
+      int offset = 25 * 16; //25 - количество символов до hyst на экране, 16 - ширина шрифта
+      int startX = 30 + offset;  //30 - начальная сдвижка текста
+      printRus(tft, String(hyst) + ") ", startX, Tcoord[POD]);     //Выводим обновленный hyst и закрывающую скобку. Tcoord[POD], т.к. координата по Y совпадает с TPOD
+      prevValues[0] = hyst;
+    }
+    if (prevValues[1] != choosenCauldron) {
+      tft.drawBitmap(325, 80, 50, 48, (choosenCauldron == GAS ? gasIcon : electroIcon));
+      prevValues[1] = choosenCauldron;
+      log("Меняю котел на " + String((choosenCauldron == GAS ? "газовый" : "электрический")), WITH_SERIAL, CONSOLE);
+    }
+    if (prevValues[2] != choosenMode) {
+      tft.drawBitmap(395, 80, 50, 48, (choosenMode == AUTO ? autoIcon : manualIcon));
+      prevValues[2] = choosenMode;
+      log("Меняю режим работы на " + String((choosenMode == AUTO ? "автоматический" : "ручной")), WITH_SERIAL, CONSOLE);
+    }
+    if (prevValues[3] != isConnected) {
+      tft.drawBitmap(20, 265, 40, 40, (isConnected == true ? checkIcon : crossIcon));
+      prevValues[3] = isConnected;
+    }
     //WIP
   }
+}
+
+void handleEncoderTurn(int dir) {         //Функция для обработки вращения энкодера
+  if (dir == 1) { //Вращение по часовой стрелке
+    Serial << "Часовая\n";
+  }
+  else { //Вращение против часовой стрелки
+    Serial << "Нечасовая\n";
+  }
+  delay(50);    //Для того, чтобы убрать дребезг
+}
+
+void encButtonPress() {         //Функция для обработки нажатия на кнопку
+  Serial << "Энкодер\n";
+  delay(50);    //Для того, чтобы убрать дребезг
+}
+void switchCauldron() {
+  Serial << "Смена котла\n";
+  executeInConsole("changeValue choosenCauldron," + String((choosenCauldron == GAS ? "electro" : "gas")));
+  delay(50);    //Для того, чтобы убрать дребезг
+}
+void switchCauldronMode() {
+  Serial << "Смена режима котла\n";
+  executeInConsole("changeValue choosenMode," + String((choosenMode == AUTO ? "manual" : "auto")));
+  delay(150);    //Для того, чтобы убрать дребезг (кнопка работает хуже, нужно больше задержки)
+}
+
+bool buttonsPressed[3] = { 0 };   //Массив, для хранения информации, была ли нажата кнопка или нет (0 - энкодер, 1 - switchCauldronPin, 2 - switchModePin)
+
+void checkButtonPress(int pin, int index) {   //Универсальная функция для проверки нажатия на кнопку (index - индекс в массиве buttonsPressed)
+  if (digitalRead(pin) == 0 ) {  //Если на кнопка зажата
+    if (!buttonsPressed[index]) {      //и не нажималась до этого
+
+      switch (pin) {      //Для разных пинов - своя функция
+        case pin_btn: encButtonPress(); break;         //Функция для обработки нажатия на кнопку энкодера
+        case switchCauldronPin: switchCauldron(); break;         //Функция для обработки нажатия на кнопку смены котла
+        case switchModePin: switchCauldronMode(); break;         //Функция для обработки нажатия на кнопку смены режима котла
+      }
+
+      buttonsPressed[index] = true;
+    }
+  }
+  else buttonsPressed[index] = false;       //Как только кнопку отпустили - ее можно нажимать еще раз
+}
+
+void checkManualInput() {       //Проверка ввода с энкодера
+  encoder_A = digitalRead(pin_A);     //Считываем состояние выхода А энкодера
+  encoder_B = digitalRead(pin_B);     //Считываем состояние выхода B энкодера
+  if ((encoder_A == 0) && (encoder_A_prev == 1)) //Если состояние изменилось с положительного к нулю (произошел проворот)
+    handleEncoderTurn(encoder_B);   //Функция для обработки вращения (выход B сообщит направление)
+  encoder_A_prev = encoder_A;   //Сохраняем предыдущее значение для последующей обработки
+
+  //Проверка нажатия всех кнопок
+  checkButtonPress(pin_btn, 0);
+  checkButtonPress(switchCauldronPin, 1);
+  checkButtonPress(switchModePin, 2);
+
 }
 
 void setup() {
@@ -458,8 +601,19 @@ void setup() {
   setSyncProvider(RTC.get);         //Автоматическая синхронизация с часами каждые пять минут
   Serial << "Добро пожаловать в CauldronContol от IZ-Software! (v" << V << ")\n\n";
   Serial << "Инициализация...";
-  // put your setup code here, to run once:
+
+  pinMode(pin_A, INPUT);
+  pinMode(pin_B, INPUT);
+  pinMode(pin_btn, INPUT_PULLUP);     //Подтягиваем кнопки встроенным резистором
+  pinMode(switchCauldronPin, INPUT_PULLUP);
+  pinMode(switchModePin, INPUT_PULLUP);
+
+  pinMode(redLed, OUTPUT);
+  pinMode(greenLed, OUTPUT);          //Светодиоды
+  pinMode(blueLed, OUTPUT);
+
   tft.InitLCD(LANDSCAPE);
+
   Serial << "Готово\n";
   Serial << "Размер экрана: " << tft.getDisplayXSize() << " на " << tft.getDisplayYSize() << " пикселей\n\n";;
   tft.clrScr();
@@ -513,9 +667,10 @@ void loop() {
   // put your main code here, to run repeatedly:
   if (mainScreenUpdates) updateMainScreen();   //Обновление главного экрана при изменении каких-то переменных (всегда свежая инфа на экране)
 
-  checkConsole();     //Обязательно проверять консоль и реагировать на нее
-  checkESPInput();    //Не забудем и про ввод с приложения
+  checkConsole();       //Обязательно проверять консоль и реагировать на нее
+  checkESPInput();      //Не забудем и про ввод с приложения
 
+  checkManualInput();   //Также ручной ввод с помощью энкодера
 
-  updateTime();       //Обновление времени и обработка событий по времени
+  updateTime();         //Обновление времени и обработка событий по времени
 }
