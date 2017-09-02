@@ -1,22 +1,28 @@
-#include <ESP8266WiFi.h>
+#include <Dhcp.h>
+#include <Dns.h>
+#include <Ethernet.h>
+#include <EthernetClient.h>
+#include <EthernetServer.h>
+#include <EthernetUdp.h>
+
+//#include <ESP8266WiFi.h>
 #include <Streaming.h>
 #include <SoftwareSerial.h>
 
-SoftwareSerial mySerial(5, 4, false, 256); // RX, TX (1, 2)
+SoftwareSerial mySerial(6, 7); // RX, TX
 
 #define led 13
 
-const char* ssid = "D.Misha3";
-const char* password = "nissan6585";
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED }; 
 
 IPAddress ip(192, 168, 1, 177);
 IPAddress gateway(192, 168, 1, 150);
 IPAddress subnet(255, 255, 255, 0);
 
-WiFiServer server(3000);
+EthernetServer server(3000);
 
 void msgMainDevice(String message) {        //Отправка сообщения в mySerial с "*" окончанием
-  mySerial.print(message + "*");
+  Serial.print(message + "*");
 }
 
 void setup() {
@@ -25,52 +31,54 @@ void setup() {
   delay(10);
 
   // prepare GPIO2
-  pinMode(2, OUTPUT);
-  digitalWrite(2, 0);
+  /*pinMode(2, OUTPUT);
+  digitalWrite(2, 0);*/
 
   pinMode(led, OUTPUT);
 
   // Connect to WiFi network
-  Serial.println();
+  /*Serial.println();
   Serial.println();
   Serial.print("Подключаюсь к ");
   Serial.println(ssid);
 
   WiFi.config(ip, gateway, subnet);
-  WiFi.begin(ssid, password);
+  WiFi.begin(ssid, password);*/
 
-  while (WiFi.status() != WL_CONNECTED) {
+  /*while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
   Serial.println("");
-  Serial.println("WiFi подключен!");
+  Serial.println("WiFi подключен!");*/
+
+  Ethernet.begin(mac, ip);
 
   //Start the server
-  Serial << "Запускаю сервер\n";
+  mySerial << "Запускаю сервер\n";
   server.begin();
-  Serial << "Сервер запущен на ";
+  mySerial << "Сервер запущен на ";
 
   // Print the IP address
-  Serial.println(WiFi.localIP());
+  mySerial.println(Ethernet.localIP());
 
   msgMainDevice("unhook");    //Нужно убедиться, что по умолчанию консоль присоединилась к Serial
 }
 
-WiFiClient client;
+EthernetClient client;
 
 String serialMsg = "";
 
 void checkMainDevice() {
-  while (mySerial.available()) {
-    char c = mySerial.read();
+  while (Serial.available()) {
+    char c = Serial.read();
     if (c != '*') serialMsg += c;
     else if (c == '*' || c == '~') break; //Если вдруг пришло несколько сообщений, а мы не успели прочесть ИЛИ если это еще одно сообщение от консоли
     delay(5); //Иногда сообщение рвется, дадим небольшую задержку
   }
 
   if (serialMsg != "") {
-    Serial << "Данные от основного устройства: " << serialMsg << endl;
+    mySerial << "Данные от основного устройства: " << serialMsg << endl;
     if (serialMsg.indexOf('~') != -1) {
       //serialMsg = serialMsg.substring(1);     //Получаем всю команду со второй позиции (после ~)
       client.print(serialMsg);                  //Отправляем вывод консоли к клиенту
@@ -83,7 +91,7 @@ void checkMainDevice() {
 }
 
 void analizeClientMessage(String request) {
-  if (request != "") Serial << "Получена команда: " << request << endl;
+  if (request != "") mySerial << "Получена команда: " << request << endl;
   if (request == "c") {
     client.print("connected");
   }
@@ -100,7 +108,7 @@ void loop() {
   checkMainDevice();
   client = server.available();
   if (client) {
-    Serial.println("Клиент подсоединился.");
+    mySerial.println("Клиент подсоединился.");
 
     while (client.connected()) {
       checkMainDevice();
@@ -112,7 +120,7 @@ void loop() {
       }
       analizeClientMessage(message);
     }
-    Serial.println("Клиент отсоединился.");
+    mySerial.println("Клиент отсоединился.");
     msgMainDevice("unhook");    //На случай, если соединение разорвалось
     client.stop();
   }

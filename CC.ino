@@ -19,10 +19,24 @@ time_t tLast;
 time_t t;
 tmElements_t tm;
 
+//Переменные для температурных датчиков
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+#define ONE_WIRE_BUS 4
+#define TEMPERATURE_PRECISION 12
+
+OneWire oneWire(ONE_WIRE_BUS);
+
+DallasTemperature sensors(&oneWire);
+
+//Хранилище всех авто адресов
+unsigned char addresses[4][8];
+
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "1.1-beta";
+String V = "1.2-beta";
 
 /*  CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием LCD экрана для визуализации и помощи пользователю в ориентировании
     Оригинальная программа была так себе (в силу моего незнания языка), но сейчас я хочу сделать эту работу по максимуму хорошо!
@@ -67,9 +81,13 @@ float T[7] {
   20.0,   //TPOL
   20.0,   //UL
   19.0,   //DOM
-  50.0,   //SETPOD
-  21.0,   //SETDOM
+  EEPROM.read(3),   //SETPOD
+  EEPROM.read(4),   //SETDOM
 };
+
+
+#define FORCE_AUTO_ADDRESSES true
+bool useThermometers = true;    //Переменная, поставив которую в false можно "заморозить" считывание с датчиков
 
 int Tcoord[7] {50, 80, 110, 220, 250, 50, 250}; //Кординаты по Y-ку всех строк (а именно самих чисел), у SETPOD и SETDOM координата совпадает с POD и DOM соответсвенно
 
@@ -103,10 +121,10 @@ int hyst = EEPROM.read(0);  //prevValues[0]
 #define GAS 0
 #define AUTO 1
 #define MANUAL 0
-int choosenCauldron = EEPROM.read(1); //prevValues[1]
-int choosenMode = EEPROM.read(2); //prevValues[2]
+int chosenCauldron = EEPROM.read(1); //prevValues[1]
+int chosenMode = EEPROM.read(2); //prevValues[2]
 //Переменная для хранении данных о состоянии подключения к "маленькому" устройству
-bool isConnected;
+bool isConnectedToSmall;
 
 
 bool setFontByName(String name) {    //Функция для возможности устанавливать шрифт через консоль
@@ -301,24 +319,31 @@ void executeInConsole(String consoleMsg, bool hidden = false) {                 
       else if (name == "ttpol") T[TPOL] = flValue;
       else if (name == "tul") T[UL] = flValue;
       else if (name == "tdom") T[DOM] = flValue;
-      else if (name == "tsetpod") T[SETPOD] = flValue;
-      else if (name == "tsetdom") T[SETDOM] = flValue;
+      else if (name == "tsetpod") {
+        T[SETPOD] = flValue;
+        EEPROM.update(3, T[SETPOD]);
+      }
+      else if (name == "tsetdom") {
+        T[SETDOM] = flValue;
+        EEPROM.update(4, T[SETDOM]);
+      }
       else if (name == "mainScreenUpdates") mainScreenUpdates = bool(value);
       else if (name == "hyst") {
         hyst = value.toInt();
         EEPROM.update(0, hyst);
       }
-      else if (name == "choosenCauldron") {
-        choosenCauldron = (value == "gas" ? GAS : ELECTRO);
+      else if (name == "chosenCauldron") {
+        chosenCauldron = (value == "gas" ? GAS : ELECTRO);
         //console("value: " + value + "; bool expr: " + String((value == "gas" ? GAS : ELECTRO)));
-        EEPROM.update(1, choosenCauldron);
+        EEPROM.update(1, chosenCauldron);
       }
-      else if (name == "choosenMode") {
-        choosenMode = (value == "auto" ? AUTO : MANUAL);
+      else if (name == "chosenMode") {
+        chosenMode = (value == "auto" ? AUTO : MANUAL);
         //console("value: " + value + "; bool expr: " + String((value == "auto" ? AUTO : MANUAL)));
-        EEPROM.update(2, choosenMode);
+        EEPROM.update(2, chosenMode);
       }
-      else if (name == "isConnected") isConnected = value.toInt();
+      else if (name == "isConnectedToSmall") isConnectedToSmall = bool(value);
+      else if (name == "useThermometers") useThermometers = bool(value);
       else console("Такая переменная не внесена в список");
     }
     else console("Такой команды нет. Используйте \"help\", чтобы получить список команд");
@@ -403,6 +428,12 @@ void serialCommand(String command) {
   Serial1 << command + "*";
 }
 
+void sendTempCauldronData() {
+  String data = String(T[POD], 1) + "," + String(T[SETPOD], 0) + "," + String(T[OBR], 1) + "," + String(T[TPOL], 1) + "," + String(T[UL], 1) + "," + String(T[DOM], 1) + "," + String(T[SETDOM], 1) + "," +
+                String((chosenCauldron == GAS ? "gas" : "electro")) + "," + String((chosenMode == AUTO ? "auto" : "manual")) + "," + String(hyst);
+  Serial1 << "tempAndCauldronData`" << data;
+}
+
 void checkESPInput() {
   while (Serial1.available()) {
     char c = Serial1.read();
@@ -426,6 +457,9 @@ void checkESPInput() {
       serialMsg = serialMsg.substring(serialMsg.indexOf(' ') + 1); //Удаляем слово Console и пробел после него из сообщения
       executeInConsole(serialMsg);
     }
+    else if (serialMsg == "requestData") {
+      sendTempCauldronData();
+    }
 
     serialMsg = "";
   }
@@ -438,6 +472,14 @@ void redrawTime() {
   tft.print(formatValue(hour()) + ":" + formatValue(minute()), tft.getDisplayXSize() - tft.getFontXsize() * 5 - 5, tft.getDisplayYSize() - tft.getFontYsize() - 3);
 }
 
+void updateTempData() {
+  sensors.requestTemperatures();
+  for (int i = 0; i < 4; i++) {
+    float tempC = sensors.getTempC(addresses[i]);
+    T[i] = tempC;
+  }
+}
+
 void updateTime() {
   t = now();
   if (t != tLast) {
@@ -445,6 +487,12 @@ void updateTime() {
     //Если время изменилось на секунду, то:
     if (second() == 0) {      //Каждую новую минуту
       redrawTime();     //Рисовать новое текущее время в углу
+    }
+
+    //TODO: Увеличить до 20
+
+    if (second() % 5 == 0) {    //Каждые пять секунд
+      if (useThermometers) updateTempData();     //Считывание температурных датчиков
     }
 
     if (hour() == 0 && minute() == 0 && second() == 0) {      //Если это новый день, то
@@ -479,10 +527,10 @@ void updateMainScreen(bool redraw = false) {
     tft.print(formatValue(hour()) + ":" + formatValue(minute()), tft.getDisplayXSize() - tft.getFontXsize() * 5 - 5, tft.getDisplayYSize() - tft.getFontYsize() - 3);
 
     //Картинки и иконки
-    tft.drawBitmap(325, 80, 50, 48, (choosenCauldron == GAS ? gasIcon : electroIcon));
-    tft.drawBitmap(395, 80, 50, 48, (choosenMode == AUTO ? autoIcon : manualIcon));
+    tft.drawBitmap(325, 80, 50, 48, (chosenCauldron == GAS ? gasIcon : electroIcon));
+    tft.drawBitmap(395, 80, 50, 48, (chosenMode == AUTO ? autoIcon : manualIcon));
 
-    tft.drawBitmap(20, 265, 40, 40, (isConnected == true ? checkIcon : crossIcon));
+    tft.drawBitmap(20, 275, 40, 40, (isConnectedToSmall == true ? checkIcon : crossIcon));
 
     //Теперь заполняем предыдущие значения переменных
     for (int i = 0; i < 7; i++) Tprev[i] = T[i];      //7 - размер массива
@@ -519,19 +567,18 @@ void updateMainScreen(bool redraw = false) {
       printRus(tft, String(hyst) + ") ", startX, Tcoord[POD]);     //Выводим обновленный hyst и закрывающую скобку. Tcoord[POD], т.к. координата по Y совпадает с TPOD
       prevValues[0] = hyst;
     }
-    if (prevValues[1] != choosenCauldron) {
-      tft.drawBitmap(325, 80, 50, 48, (choosenCauldron == GAS ? gasIcon : electroIcon));
-      prevValues[1] = choosenCauldron;
-      log("Меняю котел на " + String((choosenCauldron == GAS ? "газовый" : "электрический")), WITH_SERIAL, CONSOLE);
+    if (prevValues[1] != chosenCauldron) {
+      tft.drawBitmap(325, 80, 50, 48, (chosenCauldron == GAS ? gasIcon : electroIcon));
+      prevValues[1] = chosenCauldron;
+
     }
-    if (prevValues[2] != choosenMode) {
-      tft.drawBitmap(395, 80, 50, 48, (choosenMode == AUTO ? autoIcon : manualIcon));
-      prevValues[2] = choosenMode;
-      log("Меняю режим работы на " + String((choosenMode == AUTO ? "автоматический" : "ручной")), WITH_SERIAL, CONSOLE);
+    if (prevValues[2] != chosenMode) {
+      tft.drawBitmap(395, 80, 50, 48, (chosenMode == AUTO ? autoIcon : manualIcon));
+      prevValues[2] = chosenMode;
     }
-    if (prevValues[3] != isConnected) {
-      tft.drawBitmap(20, 265, 40, 40, (isConnected == true ? checkIcon : crossIcon));
-      prevValues[3] = isConnected;
+    if (prevValues[3] != isConnectedToSmall) {
+      tft.drawBitmap(20, 275, 40, 40, (isConnectedToSmall == true ? checkIcon : crossIcon));
+      prevValues[3] = isConnectedToSmall;
     }
     //WIP
   }
@@ -553,12 +600,16 @@ void encButtonPress() {         //Функция для обработки на�
 }
 void switchCauldron() {
   Serial << "Смена котла\n";
-  executeInConsole("changeValue choosenCauldron," + String((choosenCauldron == GAS ? "electro" : "gas")));
+  executeInConsole("changeValue chosenCauldron," + String((chosenCauldron == GAS ? "electro" : "gas")));
+  log("Меняю котел на " + String((chosenCauldron == GAS ? "газовый" : "электрический")), WITH_SERIAL, CONSOLE); \
+  sendTempCauldronData();
   delay(50);    //Для того, чтобы убрать дребезг
 }
 void switchCauldronMode() {
   Serial << "Смена режима котла\n";
-  executeInConsole("changeValue choosenMode," + String((choosenMode == AUTO ? "manual" : "auto")));
+  executeInConsole("changeValue chosenMode," + String((chosenMode == AUTO ? "manual" : "auto")));
+  log("Меняю режим работы на " + String((chosenMode == AUTO ? "автоматический" : "ручной")), WITH_SERIAL, CONSOLE);
+  sendTempCauldronData();
   delay(150);    //Для того, чтобы убрать дребезг (кнопка работает хуже, нужно больше задержки)
 }
 
@@ -594,10 +645,14 @@ void checkManualInput() {       //Проверка ввода с энкодер�
 
 }
 
+void assignAddress(unsigned char *to, unsigned char *from) {
+  for (int i = 0; i < 8; i++) to[i] = from[i];
+}
+
 void setup() {
   /*Дефолтная инициализация*/
   Serial.begin(9600);
-  Serial1.begin(9600);
+  //Serial1.begin(9600);
   setSyncProvider(RTC.get);         //Автоматическая синхронизация с часами каждые пять минут
   Serial << "Добро пожаловать в CauldronContol от IZ-Software! (v" << V << ")\n\n";
   Serial << "Инициализация...";
@@ -612,10 +667,45 @@ void setup() {
   pinMode(greenLed, OUTPUT);          //Светодиоды
   pinMode(blueLed, OUTPUT);
 
+  //Температурные датчики
+  Serial << "Обнаружение температурных устройств...";
+  sensors.begin();
+  Serial.print("Найдено: ");
+  Serial.println(sensors.getDeviceCount(), DEC);
+
+  if (FORCE_AUTO_ADDRESSES) {
+    for (int i = 0; i < 4; i++) {
+      if (!sensors.getAddress(addresses[i], i)) Serial << "Ошибка получения адреса для температурного устройства " << i << endl;
+      sensors.setResolution(addresses[i], TEMPERATURE_PRECISION);
+    }
+  }
+  else {
+    //Адреса датчиков на реальном устройстве
+    unsigned char podT[8] = {
+      0x28, 0x04, 0x25, 0xB2, 0x05, 0x00, 0x00, 0x4B
+    };
+
+    unsigned char tpolT[8] = {
+      0x28, 0xE4, 0x58, 0xB2, 0x05, 0x00, 0x00, 0xE3
+    };
+
+    unsigned char ulT[8] = {
+      0x28, 0xF4, 0x98, 0xB1, 0x05, 0x00, 0x00, 0x12
+    };
+
+    unsigned char obrT[8] = {
+      0x28, 0xEB, 0xB3, 0xB2, 0x05, 0x00, 0x00, 0x6D
+    };
+
+    assignAddress(addresses[POD],podT);
+    assignAddress(addresses[TPOL], tpolT);
+    assignAddress(addresses[UL], ulT);
+    assignAddress(addresses[OBR], obrT);
+  }
+
   tft.InitLCD(LANDSCAPE);
 
-  Serial << "Готово\n";
-  Serial << "Размер экрана: " << tft.getDisplayXSize() << " на " << tft.getDisplayYSize() << " пикселей\n\n";;
+  Serial << "\nРазмер экрана: " << tft.getDisplayXSize() << " на " << tft.getDisplayYSize() << " пикселей\n\n";;
   tft.clrScr();
   /*tft.setColor(VGA_GRAY);
     tft.fillRect(0, 0, tft.getDisplayXSize() - 1, tft.getDisplayYSize() - 1);*/
