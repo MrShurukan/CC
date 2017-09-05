@@ -36,7 +36,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "1.2-beta";
+String V = "1.3-beta";
 
 /*  CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием LCD экрана для визуализации и помощи пользователю в ориентировании
     Оригинальная программа была так себе (в силу моего незнания языка), но сейчас я хочу сделать эту работу по максимуму хорошо!
@@ -66,6 +66,9 @@ extern unsigned short autoIcon[0x960];
 extern unsigned short manualIcon[0x960];
 extern unsigned short checkIcon[0x640];
 extern unsigned short crossIcon[0x640];
+extern unsigned short gearIcon[0x960];
+extern unsigned short greenCoil[0x960];
+extern unsigned short redCoil[0x960];
 
 #define POD 0
 #define OBR 1
@@ -85,9 +88,11 @@ float T[7] {
   EEPROM.read(4),   //SETDOM
 };
 
+int heatTemp;   //Температура подогрева
 
-#define FORCE_AUTO_ADDRESSES true
-bool useThermometers = true;    //Переменная, поставив которую в false можно "заморозить" считывание с датчиков
+#define FORCE_AUTO_ADDRESSES true  //Если стоит в true, то вместо предустановленных адресов будут считываться новые автоматом
+bool useThermometers = true;       //Переменная, поставив которую в false можно "заморозить" считывание с датчиков
+int thermometersRefreshRate = 5;      //Частота обновления датчиков
 
 int Tcoord[7] {50, 80, 110, 220, 250, 50, 250}; //Кординаты по Y-ку всех строк (а именно самих чисел), у SETPOD и SETDOM координата совпадает с POD и DOM соответсвенно
 
@@ -112,9 +117,11 @@ int encoder_A_prev = 0;
 #define redLed A13
 #define blueLed A14
 #define greenLed A15
+//Переменные для управления котлом
+byte gasPin = A0, elecPinStart = A1, elecPinStop = A2, elecPinHigh = A3, elecPinLow = A4, elecPinPump = A5, pinTPol = A6;
 
 //Переменные для настройки работы котла
-int prevValues[3];      //Предыдущие значения последующих переменных (для обновления на экране). Снизу указаны индексы
+int prevValues[6];      //Предыдущие значения последующих переменных (для обновления на экране). Снизу указаны индексы
 int hyst = EEPROM.read(0);  //prevValues[0]
 //Переменные для хранения выбраного котла и режима. В EEPROM сохраняются цифрами 1 и 0 (0 - gas/auto; 1 - electro/manual)
 #define ELECTRO 1
@@ -124,8 +131,18 @@ int hyst = EEPROM.read(0);  //prevValues[0]
 int chosenCauldron = EEPROM.read(1); //prevValues[1]
 int chosenMode = EEPROM.read(2); //prevValues[2]
 //Переменная для хранении данных о состоянии подключения к "маленькому" устройству
-bool isConnectedToSmall;
+bool isConnectedToSmall; //prevValues[3]
 
+//Текущий Heat
+#define HEATOFF 0
+#define GREENHEAT 1
+#define REDHEAT 2
+int activeHeat = HEATOFF; //prevValues[4]
+
+//Работает ли котел в общем
+#define INACTIVE 0
+#define ACTIVE 1
+int csystemState = INACTIVE;    //cauldron system state  //prevValues[5]
 
 bool setFontByName(String name) {    //Функция для возможности устанавливать шрифт через консоль
   if (name == "SmallRusFont") tft.setFont(SmallRusFont);
@@ -141,6 +158,8 @@ String consoleMsg = "", serialMsg = "";
 
 bool consoleHooked = false;     //Если консоль "подцеплена", то весь ее output перенаправляется в ESP вместо Serial и vice versa
 bool mainScreenUpdates = true;  //Иногда нужно останавливать обновление экрана (например, вход в меню)
+
+bool elecCauldronIsOn = false;
 
 String formatValue(int v) {
   return (v < 10 ? "0" + String(v) : String(v));
@@ -186,21 +205,24 @@ void log(String msg, bool copyToSerial = false, String type = "") {             
 }
 
 #define HIDDEN true
+#define NO_LOG false
 
-void executeInConsole(String consoleMsg, bool hidden = false) {                 //Функция для исполнения команды в консоли
+void executeInConsole(String consoleMsg, bool hidden = false, bool logCommand = true) {                 //Функция для исполнения команды в консоли
   if (!hidden) {
     console(consoleMsg);
 
-    if (!consoleHooked) log("Выполнение команды (с Serial): " + consoleMsg);
-    else log("Выполнение команды: " + consoleMsg);
+    if (logCommand) {
+      if (!consoleHooked) log("Выполнение команды (с Serial): " + consoleMsg);
+      else log("Выполнение команды: " + consoleMsg);
+    }
   }
 
   if (consoleMsg.indexOf(' ') != -1) {    //Если команда - это несколько слов
 
     String firstWord = consoleMsg.substring(0, consoleMsg.indexOf(' ')); //Первое слово
 
-    if (firstWord != "log" && firstWord != "printLog") {     //Не нужно писать "Выполнение команды", если ты сам выводишь свое сообщение в LOG или хочешь его вывести
-      if (!consoleHooked) log("Выполнение команды  (с Serial): " + consoleMsg);
+    if (firstWord != "log" && firstWord != "printLog" && firstWord != "setTime") {     //Не нужно писать "Выполнение команды", если ты сам выводишь свое сообщение в LOG или хочешь его вывести
+      if (!consoleHooked) log("Выполнение команды (с Serial): " + consoleMsg);
       else log("Выполнение команды: " + consoleMsg);
     }
 
@@ -342,8 +364,11 @@ void executeInConsole(String consoleMsg, bool hidden = false) {                 
         //console("value: " + value + "; bool expr: " + String((value == "auto" ? AUTO : MANUAL)));
         EEPROM.update(2, chosenMode);
       }
-      else if (name == "isConnectedToSmall") isConnectedToSmall = bool(value);
-      else if (name == "useThermometers") useThermometers = bool(value);
+      else if (name == "isConnectedToSmall") isConnectedToSmall = value.toInt();
+      else if (name == "useThermometers") useThermometers = value.toInt();
+      else if (name == "thermometersRefreshRate") thermometersRefreshRate = value.toInt();
+      else if (name == "activeHeat") activeHeat = value.toInt();
+      else if (name == "csystemState") csystemState = value.toInt();
       else console("Такая переменная не внесена в список");
     }
     else console("Такой команды нет. Используйте \"help\", чтобы получить список команд");
@@ -357,6 +382,7 @@ void executeInConsole(String consoleMsg, bool hidden = false) {                 
       myFile.close();
       SD.remove(LOG_NAME);        //Закрываем файл и удаляем его, тем самым очищая
       openLogFile(FILE_WRITE);    //Создания файла
+      console("Файл был очищен");
     }
     else if (consoleMsg == "printTime") {                                       /*printTime*/
       console("Системное время: [" + formatValue(day()) + " " + months[month() - 1] + " " + year() + "] " +
@@ -489,9 +515,7 @@ void updateTime() {
       redrawTime();     //Рисовать новое текущее время в углу
     }
 
-    //TODO: Увеличить до 20
-
-    if (second() % 5 == 0) {    //Каждые пять секунд
+    if (second() % thermometersRefreshRate == 0) {    //Каждые thermometersRefreshRate секунд
       if (useThermometers) updateTempData();     //Считывание температурных датчиков
     }
 
@@ -529,6 +553,9 @@ void updateMainScreen(bool redraw = false) {
     //Картинки и иконки
     tft.drawBitmap(325, 80, 50, 48, (chosenCauldron == GAS ? gasIcon : electroIcon));
     tft.drawBitmap(395, 80, 50, 48, (chosenMode == AUTO ? autoIcon : manualIcon));
+
+    if (activeHeat != HEATOFF) tft.drawBitmap(325, 150, 50, 48, (activeHeat == GREENHEAT ? greenCoil : redCoil));
+    if (csystemState != INACTIVE) tft.drawBitmap(395, 150, 50, 48, gearIcon);
 
     tft.drawBitmap(20, 275, 40, 40, (isConnectedToSmall == true ? checkIcon : crossIcon));
 
@@ -580,6 +607,22 @@ void updateMainScreen(bool redraw = false) {
       tft.drawBitmap(20, 275, 40, 40, (isConnectedToSmall == true ? checkIcon : crossIcon));
       prevValues[3] = isConnectedToSmall;
     }
+    if (prevValues[4] != activeHeat) {
+      if (activeHeat != HEATOFF) tft.drawBitmap(325, 150, 50, 48, (activeHeat == GREENHEAT ? greenCoil : redCoil));
+      else {
+        tft.setColor(VGA_GRAY);
+        tft.fillRect(325, 150, 375, 198);
+      }
+      prevValues[4] = activeHeat;
+    }
+    if (prevValues[5] != csystemState) {
+      if (csystemState != INACTIVE) tft.drawBitmap(395, 150, 50, 48, gearIcon);
+      else {
+        tft.setColor(VGA_GRAY);
+        tft.fillRect(395, 150, 445, 198);
+      }
+      prevValues[5] = csystemState;
+    }
     //WIP
   }
 }
@@ -594,20 +637,25 @@ void handleEncoderTurn(int dir) {         //Функция для обработ
   delay(50);    //Для того, чтобы убрать дребезг
 }
 
+void switchElecCauldron(bool state, bool globalShutdown = true);
+void switchGasCauldron(bool state);
+
 void encButtonPress() {         //Функция для обработки нажатия на кнопку
   Serial << "Энкодер\n";
   delay(50);    //Для того, чтобы убрать дребезг
 }
 void switchCauldron() {
-  Serial << "Смена котла\n";
-  executeInConsole("changeValue chosenCauldron," + String((chosenCauldron == GAS ? "electro" : "gas")));
-  log("Меняю котел на " + String((chosenCauldron == GAS ? "газовый" : "электрический")), WITH_SERIAL, CONSOLE); \
+  //Serial << "Смена котла\n";
+  executeInConsole("changeValue chosenCauldron," + String((chosenCauldron == GAS ? "electro" : "gas")), HIDDEN, NO_LOG);
+  if (chosenCauldron == GAS) switchGasCauldron(true);
+  else switchElecCauldron(true);
+  log("Меняю котел на " + String((chosenCauldron == GAS ? "газовый" : "электрический")), WITH_SERIAL, CONSOLE);
   sendTempCauldronData();
   delay(50);    //Для того, чтобы убрать дребезг
 }
 void switchCauldronMode() {
-  Serial << "Смена режима котла\n";
-  executeInConsole("changeValue chosenMode," + String((chosenMode == AUTO ? "manual" : "auto")));
+  //Serial << "Смена режима котла\n";
+  executeInConsole("changeValue chosenMode," + String((chosenMode == AUTO ? "manual" : "auto")), HIDDEN, NO_LOG);
   log("Меняю режим работы на " + String((chosenMode == AUTO ? "автоматический" : "ручной")), WITH_SERIAL, CONSOLE);
   sendTempCauldronData();
   delay(150);    //Для того, чтобы убрать дребезг (кнопка работает хуже, нужно больше задержки)
@@ -649,13 +697,75 @@ void assignAddress(unsigned char *to, unsigned char *from) {
   for (int i = 0; i < 8; i++) to[i] = from[i];
 }
 
+void switchGasCauldron(bool state) {
+  if (state) {
+    if (elecCauldronIsOn) {
+      // Serial << "Выключаю электро котел и включаю газовый\n";
+      switchElecCauldron(false);
+      csystemState = ACTIVE;
+      elecCauldronIsOn = false;
+    }
+    digitalWrite(gasPin, HIGH);
+  }
+  else {
+    csystemState = INACTIVE;
+    digitalWrite(gasPin, LOW);
+  }
+}
+
+#define LOCAL false
+void switchElecCauldron(bool state, bool globalShutdown = true) {
+  if (state) {
+    csystemState = ACTIVE;
+    if (!elecCauldronIsOn) {
+      //Serial << "Выключаю газовый котел и включаю электро\n";
+
+      switchGasCauldron(false);
+
+      digitalWrite(elecPinPump, HIGH);
+
+      digitalWrite(elecPinStart, HIGH);
+      delay(500);
+      digitalWrite(elecPinStart, LOW);
+      elecCauldronIsOn = true;
+    }
+    if (T[SETPOD] <= 42) {
+      digitalWrite(elecPinLow, HIGH);
+      digitalWrite(elecPinHigh, LOW);
+    }
+    else {
+      digitalWrite(elecPinLow, LOW);
+      digitalWrite(elecPinHigh, HIGH);
+    }
+  }
+  else if (globalShutdown) {
+    digitalWrite(elecPinPump, LOW);
+
+    digitalWrite(elecPinLow, LOW);
+    digitalWrite(elecPinHigh, LOW);
+    if (elecCauldronIsOn) {
+      csystemState = INACTIVE;
+
+      digitalWrite(elecPinStop, HIGH);
+      delay(500);
+      digitalWrite(elecPinStop, LOW);
+      elecCauldronIsOn = false;
+    }
+  }
+  else {
+    csystemState = INACTIVE;
+    digitalWrite(elecPinLow, LOW);
+    digitalWrite(elecPinHigh, LOW);
+  }
+}
+
 void setup() {
   /*Дефолтная инициализация*/
   Serial.begin(9600);
   //Serial1.begin(9600);
   setSyncProvider(RTC.get);         //Автоматическая синхронизация с часами каждые пять минут
   Serial << "Добро пожаловать в CauldronContol от IZ-Software! (v" << V << ")\n\n";
-  Serial << "Инициализация...";
+  Serial << "Инициализация...\n";
 
   pinMode(pin_A, INPUT);
   pinMode(pin_B, INPUT);
@@ -666,6 +776,15 @@ void setup() {
   pinMode(redLed, OUTPUT);
   pinMode(greenLed, OUTPUT);          //Светодиоды
   pinMode(blueLed, OUTPUT);
+
+  for (int i = A0; i < A12; i++)      //Все пины для управления котлами
+    pinMode(i, OUTPUT);
+
+  /*for (int i = A0; i <= A12; i++) {
+    digitalWrite(i, HIGH);
+    Serial << "Пин: " << i << endl;
+    delay(1000);
+    }*/
 
   //Температурные датчики
   Serial << "Обнаружение температурных устройств...";
@@ -697,7 +816,7 @@ void setup() {
       0x28, 0xEB, 0xB3, 0xB2, 0x05, 0x00, 0x00, 0x6D
     };
 
-    assignAddress(addresses[POD],podT);
+    assignAddress(addresses[POD], podT);
     assignAddress(addresses[TPOL], tpolT);
     assignAddress(addresses[UL], ulT);
     assignAddress(addresses[OBR], obrT);
@@ -763,4 +882,39 @@ void loop() {
   checkManualInput();   //Также ручной ввод с помощью энкодера
 
   updateTime();         //Обновление времени и обработка событий по времени
+
+
+  /*MAIN PROGRAM*/
+  if (chosenCauldron == GAS) {
+    if (chosenMode == MANUAL) {
+      if (T[POD] < T[SETPOD] - hyst) switchGasCauldron(true);
+      else if (T[POD] > T[SETPOD] + hyst) switchGasCauldron(false);
+    }
+    else if (chosenMode == AUTO) {
+      if (T[DOM] >= T[SETDOM]) switchGasCauldron(false);
+      else if (T[DOM] < T[SETDOM]) {
+        float diff = T[SETDOM] - T[DOM];
+        switchGasCauldron(true);
+        if (diff >= 0.1 && diff <= 0.5) heatTemp = 45;
+        else if (diff >= 0.6 && diff <= 1.5) heatTemp = 55;
+        else if (diff >= 1.6) heatTemp = 65;
+      }
+    }
+  }
+  else if (chosenCauldron == ELECTRO) {
+    if (chosenMode == MANUAL) {
+      if (T[POD] < T[SETPOD] - hyst) switchElecCauldron(true, LOCAL);
+      else if (T[POD] > T[SETPOD] + hyst) switchElecCauldron(false, LOCAL);
+    }
+    else if (chosenMode == AUTO) {
+      if (T[DOM] >= T[SETDOM]) switchElecCauldron(false, LOCAL);
+      else if (T[DOM] < T[SETDOM]) {
+        float diff = T[SETDOM] - T[DOM];
+        switchElecCauldron(true);
+        if (diff >= 0.1 && diff <= 0.5) heatTemp = 45;
+        else if (diff >= 0.6 && diff <= 1.5) heatTemp = 55;
+        else if (diff >= 1.6) heatTemp = 65;
+      }
+    }
+  }
 }
