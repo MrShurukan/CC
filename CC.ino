@@ -36,9 +36,10 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "1.3-beta";
+String V = "2.0-beta";
 
-/*  CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием LCD экрана для визуализации и помощи пользователю в ориентировании
+/*
+    CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
     Оригинальная программа была так себе (в силу моего незнания языка), но сейчас я хочу сделать эту работу по максимуму хорошо!
 
     Создано Ильей Завьяловым (ilyuzhaz@gmail.com), начало разработки: 27.07.2017
@@ -121,7 +122,7 @@ int encoder_A_prev = 0;
 byte gasPin = A0, elecPinStart = A1, elecPinStop = A2, elecPinHigh = A3, elecPinLow = A4, elecPinPump = A5, pinTPol = A6;
 
 //Переменные для настройки работы котла
-int prevValues[6];      //Предыдущие значения последующих переменных (для обновления на экране). Снизу указаны индексы
+int prevValues[9];      //Предыдущие значения последующих переменных (для обновления на экране). Снизу указаны индексы
 int hyst = EEPROM.read(0);  //prevValues[0]
 //Переменные для хранения выбраного котла и режима. В EEPROM сохраняются цифрами 1 и 0 (0 - gas/auto; 1 - electro/manual)
 #define ELECTRO 1
@@ -142,7 +143,18 @@ int activeHeat = HEATOFF; //prevValues[4]
 //Работает ли котел в общем
 #define INACTIVE 0
 #define ACTIVE 1
-int csystemState = INACTIVE;    //cauldron system state  //prevValues[5]
+int csystemState = INACTIVE;     //cauldron system state  //prevValues[5]
+
+int offTemp = EEPROM.read(6);    //Температура полного выключения //prevValues[6]
+
+#define HYST 0
+#define PULSE 1
+int gasMode = EEPROM.read(7);    //prevValues[7]
+
+#define AUTOHEAT 1
+#define GASHEAT 2
+#define ELECTROHEAT 3
+int heatMode = EEPROM.read(8);
 
 bool setFontByName(String name) {    //Функция для возможности устанавливать шрифт через консоль
   if (name == "SmallRusFont") tft.setFont(SmallRusFont);
@@ -349,7 +361,7 @@ void executeInConsole(String consoleMsg, bool hidden = false, bool logCommand = 
         T[SETDOM] = flValue;
         EEPROM.update(4, T[SETDOM]);
       }
-      else if (name == "mainScreenUpdates") mainScreenUpdates = bool(value);
+      else if (name == "mainScreenUpdates") mainScreenUpdates = value.toInt();
       else if (name == "hyst") {
         hyst = value.toInt();
         EEPROM.update(0, hyst);
@@ -363,6 +375,18 @@ void executeInConsole(String consoleMsg, bool hidden = false, bool logCommand = 
         chosenMode = (value == "auto" ? AUTO : MANUAL);
         //console("value: " + value + "; bool expr: " + String((value == "auto" ? AUTO : MANUAL)));
         EEPROM.update(2, chosenMode);
+      }
+      else if (name == "offTemp") {
+        offTemp = value.toInt();
+        EEPROM.update(6, offTemp);
+      }
+      else if (name == "gasMode") {
+        gasMode = (value == "hyst" ? HYST : PULSE);
+        EEPROM.update(7, gasMode);
+      }
+      else if (name == "heatMode") {
+        heatMode = (value == "auto" ? AUTOHEAT : (value == "gas" ? GASHEAT : (value == "electro" ? ELECTROHEAT : HEATOFF) ) );
+        EEPROM.update(8, heatMode);
       }
       else if (name == "isConnectedToSmall") isConnectedToSmall = value.toInt();
       else if (name == "useThermometers") useThermometers = value.toInt();
@@ -627,12 +651,93 @@ void updateMainScreen(bool redraw = false) {
   }
 }
 
+int menuSize = 6;
+char* menuLines[] = {
+  "Температура котла",
+  "Выставить гистерезис",
+  "Выбрать подогрев",
+  //"Системное время",
+  "Режим газового котла",
+  "Температура отключения",
+  "Выход"
+};
+
+bool optionSelected = false;
+int selectedLine = menuSize - 1;
+void updateMenu(bool redraw = false, int dir = 0) {
+  if (redraw) {
+    tft.fillRect(60, 40, 420, 280);
+
+    int lineSize = 220 / menuSize;
+    tft.setBackColor(255, 163, 67);
+    //tft.setBackColor(65, 105, 225);
+    tft.setColor(VGA_BLACK);
+    tft.setFont(BigRusFont);
+    for (int i = 0; i < menuSize; i++) printRus(tft, menuLines[i], CENTER, i * lineSize + 40 + lineSize / 2);
+  }
+  else {
+    int lineSize = 220 / menuSize;
+    tft.setColor(VGA_BLACK);
+    tft.setFont(BigRusFont);
+    tft.setBackColor(255, 163, 67);
+    //Закрашиваем предыдущую строчку
+    int prevLine = selectedLine - (dir == 1 ? 1 : -1);
+    if (prevLine > menuSize - 1) prevLine = 0;
+    if (prevLine < 0) prevLine = menuSize - 1;
+    printRus(tft, menuLines[prevLine], CENTER, prevLine * lineSize + 40 + lineSize / 2);
+
+    tft.setBackColor(VGA_TEAL);
+    printRus(tft, menuLines[selectedLine], CENTER, selectedLine * lineSize + 40 + lineSize / 2);
+  }
+}
+
+bool inMenu = false;
+void updateSelectedLine();
+
+void cycleValues(int val) {
+  switch (selectedLine) {
+    case 0:        //Температура котла
+      if ((T[SETPOD] > 40 || val == 1) && (T[SETPOD] < 70 || val == -1)) T[SETPOD] += val;
+      break;
+    case 1:        //Выставить гистерезис
+      if ((hyst > 1 || val == 1) && (hyst < 10 || val == -1)) hyst += val;
+      break;
+    case 2:        //Выбрать подогрев
+      if ((heatMode > 0 || val == 1) && (heatMode < 3 || val == -1)) heatMode += val;
+      break;
+    /*case 3:        //Системное время
+      printRus(tft, "       Ввод: " + String(hyst) + "      ", CENTER, lineCoord);
+      break;*/
+    case 3:        //Режим газового котла
+      if ((gasMode > 0 || val == 1) && (gasMode < 1 || val == -1)) gasMode += val;
+      break;
+    case 4:        //Температура отключения
+      if ((offTemp > 15 || val == 1) && (offTemp < 20 || val == -1)) offTemp += val;
+      break;
+  }
+  updateSelectedLine();
+}
+
 void handleEncoderTurn(int dir) {         //Функция для обработки вращения энкодера
   if (dir == 1) { //Вращение по часовой стрелке
-    Serial << "Часовая\n";
+    if (inMenu) {
+      if (!optionSelected) {
+        selectedLine++;
+        if (selectedLine > menuSize - 1) selectedLine = 0;
+        updateMenu(false, dir);
+      }
+      else cycleValues(1);
+    }
   }
   else { //Вращение против часовой стрелки
-    Serial << "Нечасовая\n";
+    if (inMenu) {
+      if (!optionSelected) {
+        selectedLine--;
+        if (selectedLine < 0) selectedLine = menuSize - 1;
+        updateMenu(false, dir);
+      }
+      else cycleValues(-1);
+    }
   }
   delay(50);    //Для того, чтобы убрать дребезг
 }
@@ -640,15 +745,72 @@ void handleEncoderTurn(int dir) {         //Функция для обработ
 void switchElecCauldron(bool state, bool globalShutdown = true);
 void switchGasCauldron(bool state);
 
+void updateSelectedLine() {
+  int lineSize = 220 / menuSize;
+  int lineCoord = selectedLine * lineSize + 40 + lineSize / 2;
+  tft.setBackColor(0, 128, 0);
+  tft.setColor(VGA_BLACK);
+  tft.setFont(BigRusFont);
+  switch (selectedLine) {
+    case 0:        //Температура котла
+      printRus(tft, "     Ввод: " + String(T[SETPOD], 0) + "    ", CENTER, lineCoord);
+      break;
+    case 1:        //Выставить гистерезис
+      printRus(tft, "       Ввод: " + String(hyst) + "      ", CENTER, lineCoord);
+      break;
+    case 2:        //Выбрать подогрев
+      printRus(tft, "   Ввод: " + String((heatMode == AUTOHEAT ? "АВТО " : (heatMode == GASHEAT ? " ГАЗ " : (heatMode == ELECTROHEAT ? "ЭЛЕКТ" : "Выкл.") ) )) + "  ", CENTER, lineCoord);
+      break;
+    /*case 3:        //Системное время
+      printRus(tft, "       Ввод: " + String(hyst) + "      ", CENTER, lineCoord);
+      break;*/
+    case 3:        //Режим газового котла
+      printRus(tft, "     Ввод: " + String((gasMode == HYST ? "HYST " : "PULSE")) + "    ", CENTER, lineCoord);
+      break;
+    case 4:        //Температура отключения
+      printRus(tft, "        Ввод: " + String(offTemp) + "       ", CENTER, lineCoord);
+      break;
+    case 5:        //Выход
+      optionSelected = false;
+      tft.setColor(VGA_GRAY);
+      tft.fillRoundRect(59, 39, 421, 281);        //Рисуем скругленный для другого эффекта отрисовки
+      updateMainScreen(REDRAW);
+      mainScreenUpdates = true;
+
+      inMenu = false;
+      break;
+  }
+}
+
 void encButtonPress() {         //Функция для обработки нажатия на кнопку
-  Serial << "Энкодер\n";
+  if (!inMenu) {                //Входим в меню
+    tft.setColor(255, 163, 67);
+    updateMenu(REDRAW);
+    updateMenu();      //Закрасим последнюю строчку, как выбранную
+    mainScreenUpdates = false;
+
+    inMenu = true;
+  }
+  else {                        //Выходим из меню
+    if (!optionSelected) {      //Если еще не было выбрано строки в меню
+      optionSelected = true;
+      updateSelectedLine();
+    }
+    else {
+      updateMenu();
+      //TODO: Сохранение в EEPROM
+
+
+      optionSelected = false;
+    }
+  }
   delay(50);    //Для того, чтобы убрать дребезг
 }
 void switchCauldron() {
   //Serial << "Смена котла\n";
   executeInConsole("changeValue chosenCauldron," + String((chosenCauldron == GAS ? "electro" : "gas")), HIDDEN, NO_LOG);
-  if (chosenCauldron == GAS) switchGasCauldron(true);
-  else switchElecCauldron(true);
+  if (chosenCauldron == GAS) switchElecCauldron(false);
+  else switchGasCauldron(false);
   log("Меняю котел на " + String((chosenCauldron == GAS ? "газовый" : "электрический")), WITH_SERIAL, CONSOLE);
   sendTempCauldronData();
   delay(50);    //Для того, чтобы убрать дребезг
