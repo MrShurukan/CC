@@ -36,7 +36,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "2.0-beta";
+String V = "2.1-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -798,8 +798,27 @@ void encButtonPress() {         //Функция для обработки на�
     }
     else {
       updateMenu();
-      //TODO: Сохранение в EEPROM
-
+      //Сохранение в EEPROM
+      switch (selectedLine) {
+        case 0:        //Температура котла
+          EEPROM.update(3, T[SETPOD]);
+          break;
+        case 1:        //Выставить гистерезис
+          EEPROM.update(0, hyst);
+          break;
+        case 2:        //Выбрать подогрев
+          EEPROM.update(8, heatMode);
+          break;
+        /*case 3:        //Системное время
+          printRus(tft, "       Ввод: " + String(hyst) + "      ", CENTER, lineCoord);
+          break;*/
+        case 3:        //Режим газового котла
+          EEPROM.update(7, gasMode);
+          break;
+        case 4:        //Температура отключения
+          EEPROM.update(6, offTemp);
+          break;
+      }
 
       optionSelected = false;
     }
@@ -815,10 +834,22 @@ void switchCauldron() {
   sendTempCauldronData();
   delay(50);    //Для того, чтобы убрать дребезг
 }
+float TSETPODPREV = -1.0;
 void switchCauldronMode() {
   //Serial << "Смена режима котла\n";
   executeInConsole("changeValue chosenMode," + String((chosenMode == AUTO ? "manual" : "auto")), HIDDEN, NO_LOG);
   log("Меняю режим работы на " + String((chosenMode == AUTO ? "автоматический" : "ручной")), WITH_SERIAL, CONSOLE);
+
+  if (chosenMode == AUTO)
+    //Сохраняем в памяти значение TSETPOD для будущего ручного режима
+    TSETPODPREV = T[SETPOD];
+  else if (TSETPODPREV != -1.0)
+    //Восстанавливаем из памяти значение TSEDPOD
+    T[SETPOD] = TSETPODPREV;
+  else
+    //Восстанавливаем из EEPROM значение TSERPOD
+    T[SETPOD] = EEPROM.read(3);
+
   sendTempCauldronData();
   delay(150);    //Для того, чтобы убрать дребезг (кнопка работает хуже, нужно больше задержки)
 }
@@ -1053,13 +1084,13 @@ void loop() {
       else if (T[POD] > T[SETPOD] + hyst) switchGasCauldron(false);
     }
     else if (chosenMode == AUTO) {
-      if (T[DOM] >= T[SETDOM]) switchGasCauldron(false);
-      else if (T[DOM] < T[SETDOM]) {
+      if (T[DOM] >= T[SETDOM] || T[POD] > T[SETPOD] + hyst) switchGasCauldron(false);
+      else if (T[DOM] < T[SETDOM] && T[POD] < T[SETPOD] - hyst) {
         float diff = T[SETDOM] - T[DOM];
         switchGasCauldron(true);
-        if (diff >= 0.1 && diff <= 0.5) heatTemp = 45;
-        else if (diff >= 0.6 && diff <= 1.5) heatTemp = 55;
-        else if (diff >= 1.6) heatTemp = 65;
+        if (diff >= 0.1 && diff <= 0.5) T[SETPOD] = 45.0;//heatTemp = 45;
+        else if (diff >= 0.6 && diff <= 1.5) T[SETPOD] = 55.0;//heatTemp = 55;
+        else if (diff >= 1.6) T[SETPOD] = 65.0;//heatTemp = 65;
       }
     }
   }
@@ -1069,14 +1100,18 @@ void loop() {
       else if (T[POD] > T[SETPOD] + hyst) switchElecCauldron(false, LOCAL);
     }
     else if (chosenMode == AUTO) {
-      if (T[DOM] >= T[SETDOM]) switchElecCauldron(false, LOCAL);
-      else if (T[DOM] < T[SETDOM]) {
+      if (T[DOM] >= T[SETDOM] || T[POD] > T[SETPOD] + hyst) switchElecCauldron(false, LOCAL);
+      else if (T[DOM] < T[SETDOM] && T[POD] < T[SETPOD] - hyst) {
         float diff = T[SETDOM] - T[DOM];
         switchElecCauldron(true);
-        if (diff >= 0.1 && diff <= 0.5) heatTemp = 45;
-        else if (diff >= 0.6 && diff <= 1.5) heatTemp = 55;
-        else if (diff >= 1.6) heatTemp = 65;
+        if (diff >= 0.1 && diff <= 0.5) T[SETPOD] = 45.0;//heatTemp = 45;
+        else if (diff >= 0.6 && diff <= 1.5) T[SETPOD] = 55.0;//heatTemp = 55;
+        else if (diff >= 1.6) T[SETPOD] = 65.0;//heatTemp = 65;
       }
     }
   }
+
+  //Теплый пол
+  if (T[POD] >= 33) digitalWrite(pinTPol, HIGH);
+  else if (T[POD] < 32) digitalWrite(pinTPol, LOW);
 }
