@@ -164,15 +164,50 @@ void updateMainScreen() {
   if (data[3] == 1) tempData3 = 0;        //Инверсия
   else tempData3 = 1;
 
-  int currHours = Time.substring(0, Time.indexOf(':') - 1).toInt();
+  int currHours = Time.substring(0, Time.indexOf(':')).toInt();
   int currMinutes = Time.substring(Time.indexOf(':') + 1).toInt();
-  if (currHours > (dayHour / 100) && currHours < (nightHour / 100)) {
-    if (currMinutes >= (dayHour % 100)) timeOfTheDay = 0;
-    else timeOfTheDay = 1;
+  //  Serial << "\nTIME: " << currHours << ":" << currMinutes << endl;
+  //  Serial << "DAYTIME: " << dayHour << endl;
+  //  Serial << "NIGHTTIME: " << nightHour << endl;
+  int dayHours = (dayHour / 100);
+  int nightHours = (nightHour / 100);
+  int dayMinutes = (dayHour % 100);
+  int nightMinutes = (nightHour % 100);
+  //  Serial << "dayHours: " << dayHours << endl;
+  //  Serial << "nightHours: " << nightHours << endl;
+  //  Serial << "dayMinutes: " << dayMinutes << endl;
+  //  Serial << "nightMinutes: " << nightMinutes << endl;
+
+  if (currHours >= dayHours && currHours <= nightHours) {
+//    Serial << "Yiii\n";
+    if (currHours == dayHours) {
+      if (currMinutes >= dayMinutes) {
+        timeOfTheDay = 0;
+//        Serial << "IT'SA DAY\n";
+      }
+      else {
+        timeOfTheDay = 1;
+//        Serial << "IT'SA NIGHT\n";
+      }
+    }
+    else if (currHours == nightHours) {
+      if (currMinutes < nightMinutes) {
+        timeOfTheDay = 0;
+//        Serial << "IT'SA DAY\n";
+      }
+      else {
+        timeOfTheDay = 1;
+//        Serial << "IT'SA NIGHT\n";
+      }
+    }
+    else {
+      timeOfTheDay = 0;
+//      Serial << "IT'SA DAY\n";
+    }
   }
   else {
-    if (currMinutes >= (nightHour % 100)) timeOfTheDay = 1;
-    else timeOfTheDay = 0;
+    timeOfTheDay = 1;
+//    Serial << "IT'SA NIGHT\n";
   }
 
   Serial << "qDay.picc=" << /*data[1];*/timeOfTheDay; sendFF();
@@ -288,7 +323,7 @@ void loop() {
       //        h = dht.readHumidity();
       t = getTemperature(insideThermometer);
       antenna << t << "*";
-      if (timeOfTheDay) antenna << nightTemp;
+      if (timeOfTheDay == 1) antenna << nightTemp;
       else antenna << dayTemp;
       antenna << "*" << Data[0] << "*" << Data[1] << "*" << dayHour << "*" << nightHour << "*" << "notupd" << "*";
 
@@ -303,7 +338,7 @@ void loop() {
       //        h = dht.readHumidity();
       t = getTemperature(insideThermometer);
       antenna << t << "*";
-      if (timeOfTheDay) antenna << nightTemp;
+      if (timeOfTheDay == 1) antenna << nightTemp;
       else antenna << dayTemp;
       antenna << "*" << Data[0] << "*" << Data[1] << "*" << dayHour << "*" << nightHour << "*" << "notupd" << "*";
 
@@ -361,7 +396,7 @@ void loop() {
         //        h = dht.readHumidity();
         t = getTemperature(insideThermometer);
         antenna << t << "*";
-        if (timeOfTheDay) antenna << nightTemp;
+        if (timeOfTheDay == 1) antenna << nightTemp;
         else antenna << dayTemp;
         antenna << "*" << Data[0] << "*" << Data[1] << "*" << dayHour << "*" << nightHour << "*" << "update" << "*";
         //updateMainScreen();

@@ -147,7 +147,7 @@ int activeHeat = HEATOFF; //prevValues[4]
 #define ACTIVE 1
 int csystemState = INACTIVE;     //cauldron system state  //prevValues[5]
 
-int offTemp = 400000;//EEPROM.read(6);    //Температура полного выключения //prevValues[6]
+int offTemp = EEPROM.read(6);    //Температура полного выключения //prevValues[6]
 
 #define HYST 0
 #define PULSE 1
@@ -1045,8 +1045,8 @@ void checkSmallDevice() {
       //Serial << "starcnt: " << starcnt << endl;
       bool updateTime = true;
       switch (starcnt) {
-        case 1: T[DOM] = msg.toFloat() / 10; break;
-        case 2: T[SETDOM] = msg.toFloat() / 10; break;
+        case 1: if (useThermometers) T[DOM] = msg.toFloat() / 10; break;
+        case 2: if (useThermometers) T[SETDOM] = msg.toFloat() / 10; break;
         case 3: if (prevValues[1] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenCauldron," + String((msg.toInt() == GAS ? "gas" : "electro"))); break;
         case 4: if (prevValues[2] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenMode," + String((msg.toInt() == AUTO ? "auto" : "manual"))); break;
         case 5: break;      //Просто игнорируем, осталось со старой системы
@@ -1084,6 +1084,23 @@ void useHeat(byte type) {
   else if (type == AUTOHEAT)
     if (chosenCauldron == GAS) switchGasCauldron(true);
     else if (chosenCauldron == ELECTRO) switchElecCauldron(true);
+}
+
+#define maxCauldronTemp 70
+#define minCauldronTemp 45
+void calcAutoTemp() {
+  double rawValue = double(map(int((T[SETDOM] - T[DOM]) * 10), 0, 20, minCauldronTemp * 10, maxCauldronTemp * 10)) / 10;
+  double factor = double(map(int(T[UL] * 100), -15 * 100, 15 * 100, 1.7 * 100, 1 * 100)) / 100;
+
+//  Serial << "rawValue: " << rawValue << endl;
+//  Serial << "factor: " << factor << endl;
+
+  T[SETPOD] = rawValue * factor;
+//  Serial << "T[SETPOD]: " << T[SETPOD] << endl;
+  if (T[SETPOD] > maxCauldronTemp) T[SETPOD] = maxCauldronTemp;
+  if (T[SETPOD] < minCauldronTemp) T[SETPOD] = minCauldronTemp;
+
+  percents = map(T[SETPOD], minCauldronTemp, maxCauldronTemp, 0, 100);
 }
 
 void setup() {
