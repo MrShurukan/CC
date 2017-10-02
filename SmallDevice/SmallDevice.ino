@@ -115,7 +115,7 @@ void setup() {
   set = 300;
   // attachInterrupt(0, btn, FALLING);
   // put your setup code here, to run once:
-  antenna.begin(9600);
+  antenna.begin(2400);
   //antenna << "Test1" << "\n";
   Serial.begin(9600);
   //Serial << "\n";
@@ -318,14 +318,14 @@ void loop() {
       Serial << "qGas.picc=2";
       sendFF();
       if (data[2] < 1) Data[0] = 1;
-      else Data[0] = 0;
+      else Data[0] = 0;/*
       sensors.requestTemperatures();
       //        h = dht.readHumidity();
       t = getTemperature(insideThermometer);
       antenna << t << "*";
       if (timeOfTheDay == 1) antenna << nightTemp;
       else antenna << dayTemp;
-      antenna << "*" << Data[0] << "*" << Data[1] << "*" << dayHour << "*" << nightHour << "*" << "notupd" << "*";
+      antenna << "*" << Data[0] << "*" << Data[1] << "*" << dayHour << "*" << nightHour << "*" << "notupd" << "*" << timeOfTheDay << "*";*/
 
       //cnt = 0;
     }
@@ -333,14 +333,14 @@ void loop() {
       Serial << "qAuto.picc=2";
       sendFF();
       if (data[3] < 1) Data[1] = 1;
-      else Data[1] = 0;
+      else Data[1] = 0;/*
       sensors.requestTemperatures();
       //        h = dht.readHumidity();
       t = getTemperature(insideThermometer);
       antenna << t << "*";
       if (timeOfTheDay == 1) antenna << nightTemp;
       else antenna << dayTemp;
-      antenna << "*" << Data[0] << "*" << Data[1] << "*" << dayHour << "*" << nightHour << "*" << "notupd" << "*";
+      antenna << "*" << Data[0] << "*" << Data[1] << "*" << dayHour << "*" << nightHour << "*" << "notupd" << "*" << timeOfTheDay << "*";*/
 
       //cnt = 0;
     }
@@ -398,7 +398,7 @@ void loop() {
         antenna << t << "*";
         if (timeOfTheDay == 1) antenna << nightTemp;
         else antenna << dayTemp;
-        antenna << "*" << Data[0] << "*" << Data[1] << "*" << dayHour << "*" << nightHour << "*" << "update" << "*";
+        antenna << "*" << Data[0] << "*" << Data[1] << "*" << dayHour << "*" << nightHour << "*" << "notupd" << "*" << timeOfTheDay << "*";
         //updateMainScreen();
         sentBefore = true;
         ignoreMain = false;
@@ -409,6 +409,7 @@ void loop() {
       if (!isArrived) {
         if (antenna.available() > 0) {
           buff = antenna.readStringUntil('*');
+//          Serial << "\n" << starcnt << " " << buff << "*";
           if (buff.startsWith("?")) resetFunc();
           if (starcnt != 8) data[starcnt] = buff.toInt();
           else Time = buff; //antenna.println(Time);
@@ -426,7 +427,7 @@ void loop() {
     }
   }
   delay(50);
-  if (cnt == 200) {
+  if (cnt == 200) {      //10 сек
     cnt = 0;
     if (!isArrived) {
       isConnected = false;

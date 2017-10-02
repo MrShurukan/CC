@@ -36,7 +36,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "2.4-beta";
+String V = "2.5-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -89,9 +89,9 @@ float T[7] {
   EEPROM.read(4),   //SETDOM
 };
 
-#define FORCE_AUTO_ADDRESSES true  //Если стоит в true, то вместо предустановленных адресов будут считываться новые автоматом
+#define FORCE_AUTO_ADDRESSES false  //Если стоит в true, то вместо предустановленных адресов будут считываться новые автоматом
 bool useThermometers = true;       //Переменная, поставив которую в false можно "заморозить" считывание с датчиков
-int thermometersRefreshRate = 5;      //Частота обновления датчиков
+int thermometersRefreshRate = 20;      //Частота обновления датчиков
 
 int percents = 0;     //Какова мощность котла в данный момент?
 
@@ -168,6 +168,8 @@ bool setFontByName(String name) {    //Функция для возможнос�
   else return false;
   return true;
 }
+
+int timeOfTheDay;     //prevValues[8]
 
 String consoleMsg = "", serialMsg = "";
 
@@ -552,6 +554,7 @@ void updateTime() {
     //Если время изменилось на секунду, то:
     if (second() == 0) {      //Каждую новую минуту
       redrawTime();     //Рисовать новое текущее время в углу
+//      if (discTime >= 60) discTime -= 60;   //Т.к. время отсоединения - минута
     }
 
     if (second() % thermometersRefreshRate == 0) {    //Каждые thermometersRefreshRate секунд
@@ -559,17 +562,17 @@ void updateTime() {
     }
 
     if (!isConnectedToSmall && second() % 5 == 0) {  //Каждые пять секунд, если не подключены к маленькому
-      //      Serial << "?" << endl;
+//            Serial << "?" << endl;
       Serial3.print("?*");
     }
 
     if (second() == discTime) {   //Если не было ответа какое-то время
-      //      Serial << "Отсоединение\n";
+//            Serial << "Отсоединение\n";
       isConnectedToSmall = false;
       ignoreSmallDevice = true;
     }
     if (second() == sendToSmallTime) {
-      //      Serial << "Отправка\n";
+//            Serial << "Отправка\n";
       Serial3.print("d*");
       Serial3 << 1 << "*" << chosenCauldron << "*" << chosenMode << "*" << csystemState << "*" << percents << "*" << int(T[SETDOM] * 10) << "*" << int(T[POD] * 10) << "*" << sendTime() << "*";
     }
@@ -613,6 +616,9 @@ void updateMainScreen(bool redraw = false) {
     if (csystemState != INACTIVE) tft.drawBitmap(395, 150, 50, 48, gearIcon);
 
     tft.drawBitmap(20, 275, 40, 40, (isConnectedToSmall == true ? checkIcon : crossIcon));
+
+//    tft.print((timeOfTheDay == 0 ? "DAY" : "NIGHT"), 30, 150);
+    tft.print((timeOfTheDay == 0 ? "DAY  " : "NIGHT"), 30, 150);
 
     //Теперь заполняем предыдущие значения переменных
     for (int i = 0; i < 7; i++) Tprev[i] = T[i];      //7 - размер массива
@@ -677,6 +683,13 @@ void updateMainScreen(bool redraw = false) {
         tft.fillRect(395, 150, 445, 198);
       }
       prevValues[5] = csystemState;
+    }
+    if (prevValues[8] != timeOfTheDay) {
+      tft.setColor(VGA_BLACK);
+      tft.setBackColor(VGA_GRAY);
+      tft.setFont(Grotesk16x32);
+      tft.print((timeOfTheDay == 0 ? "DAY  " : "NIGHT"), 30, 150);
+      prevValues[8] = timeOfTheDay;
     }
     //WIP
   }
@@ -857,7 +870,7 @@ void encButtonPress() {         //Функция для обработки на�
   delay(50);    //Для того, чтобы убрать дребезг
 }
 void switchCauldron() {
-  makeBeep(50);   //Краткое пищание
+  makeBeep(75);   //Краткое пищание
 
   //Serial << "Смена котла\n";
   executeInConsole("changeValue chosenCauldron," + String((chosenCauldron == GAS ? "electro" : "gas")), HIDDEN, NO_LOG);
@@ -870,7 +883,7 @@ void switchCauldron() {
 }
 float TSETPODPREV = -1.0;
 void switchCauldronMode() {
-  makeBeep(50);   //Краткое пищание
+  makeBeep(75);   //Краткое пищание
 
   //Serial << "Смена режима котла\n";
   executeInConsole("changeValue chosenMode," + String((chosenMode == AUTO ? "manual" : "auto")), HIDDEN, NO_LOG);
@@ -1037,9 +1050,9 @@ void checkSmallDevice() {
         starcnt++;
         break;
       }
-      delay(10); //Иногда сообщение рвется, дадим задержку
+      delay(50); //Иногда сообщение рвется, дадим задержку
     }
-    //Serial << "Получено от маленького: " << msg << endl;
+//    Serial << "Получено от маленького: " << msg << endl;
     if (msg == "!") isConnectedToSmall = true;
     else {
       //Serial << "starcnt: " << starcnt << endl;
@@ -1052,17 +1065,18 @@ void checkSmallDevice() {
         case 5: break;      //Просто игнорируем, осталось со старой системы
         case 6: break;      //Тоже самое
         case 7: if (msg == "notupd") updateTime = false;
+        case 8: timeOfTheDay = msg.toInt();     //0 - день, 1 - ночь
       }
       //Старая система, нужно подстроится под старый стиль хранения в памяти данных
-      if (starcnt == 7) {
-        //        Serial << "Данные получены" << endl;
+      if (starcnt == 8) {
+//        Serial << "Данные получены" << endl;
         //Serial3 /*<< String(timeOfTheDay) <<*/ << 1 << "*" << chosenCauldron << "*" << chosenMode << "*" << csystemState << "*" /*<< String(percents) <<*/ << 0 << "*" << int(T[SETDOM] * 10) << "*" << int(T[POD] * 10) << "*" << sendTime() << "*";
         ignoreSmallDevice = false;
         if (updateTime) {
-          discTime = second() + 15;
+          discTime = second() + 12;
           if (discTime >= 60) discTime -= 60;
 
-          sendToSmallTime = second() + 5;
+          sendToSmallTime = second() + 2;
           if (sendToSmallTime >= 60) sendToSmallTime -= 60;
         }
       }
@@ -1087,7 +1101,7 @@ void useHeat(byte type) {
 }
 
 #define maxCauldronTemp 70
-#define minCauldronTemp 45
+#define minCauldronTemp 40
 void calcAutoTemp() {
   double rawValue = double(map(int((T[SETDOM] - T[DOM]) * 10), 0, 20, minCauldronTemp * 10, maxCauldronTemp * 10)) / 10;
   double factor = double(map(int(T[UL] * 100), -15 * 100, 15 * 100, 1.7 * 100, 1 * 100)) / 100;
@@ -1107,7 +1121,7 @@ void setup() {
   /*Дефолтная инициализация*/
   Serial.begin(9600);
   //Serial1.begin(9600);
-  Serial3.begin(9600);    //"Маленькое" устройство
+  Serial3.begin(2400);    //"Маленькое" устройство
   setSyncProvider(RTC.get);         //Автоматическая синхронизация с часами каждые пять минут
   Serial << "Добро пожаловать в CauldronContol от IZ-Software! (v" << V << ")\n\n";
   Serial << "Инициализация...\n";
@@ -1237,7 +1251,7 @@ void loop() {
     else
       //Красный heat
       if (chosenMode == AUTO && T[UL] <= 10 && heatMode != HEATOFF && T[DOM] >= T[SETDOM]) activeHeat = REDHEAT;
-      else if (activeHeat == REDHEAT && T[UL] > 10.1 || heatMode == HEATOFF) activeHeat = HEATOFF;
+      else if (activeHeat == REDHEAT && T[UL] > 10.1 || heatMode == HEATOFF || T[DOM] < T[SETDOM]) activeHeat = HEATOFF;
       else if (activeHeat == GREENHEAT) activeHeat = HEATOFF;   //И отключение зеленого heat-а
 
 
