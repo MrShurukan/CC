@@ -385,6 +385,7 @@ void loop() {
           updateSecondScreen();
           updateThirdScreen();
           //antenna.println("CONNECTED!");
+//          Serial << "\n" << "Connected!";
         }
       }
     }
@@ -410,6 +411,7 @@ void loop() {
         if (antenna.available() > 0) {
           buff = antenna.readStringUntil('*');
 //          Serial << "\n" << starcnt << " " << buff << "*";
+          delay(50);
           if (buff.startsWith("?")) resetFunc();
           if (starcnt != 8) data[starcnt] = buff.toInt();
           else Time = buff; //antenna.println(Time);
@@ -420,6 +422,7 @@ void loop() {
             if (ignoreMain) updateMainScreen();
             isArrived = true;
             starcnt = 0;
+//            Serial << "\n" << "Got data!";
           }
         }
         //antenna.println(starcnt);
@@ -435,6 +438,7 @@ void loop() {
       /*updateSecondScreen();
         updateThirdScreen();*/
       //antenna.println(" DISCNTD!");
+//      Serial << "\n" << "Disconnected!";
     }
     isArrived = false;
     sentBefore = false;
