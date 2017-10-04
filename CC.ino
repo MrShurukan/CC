@@ -36,7 +36,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "2.8-beta";
+String V = "2.8.1-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -552,7 +552,7 @@ int sendToSmallTime = UNSET;
 #define TRIGGERED -2
 int elecCauldronTimeHyst = UNSET;
 
-#define blinkTime 1
+#define blinkTime 2
 int ledBlinkTimer = UNSET;
 bool blinkingLeds[3], blinkingLedsState[3];
 
@@ -1391,7 +1391,7 @@ void loop() {
     }
 
     //Теплый пол
-    if (T[POD] >= 33 && csystemState != INACTIVE) digitalWrite(pinTPol, HIGH);
+    if (T[POD] >= 33 && csystemState != INACTIVE && activeHeat != GREENHEAT) digitalWrite(pinTPol, HIGH);
     else if (T[POD] < 32) digitalWrite(pinTPol, LOW);
 
   }
