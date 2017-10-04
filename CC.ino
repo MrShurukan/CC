@@ -36,7 +36,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "2.6-beta";
+String V = "2.7-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -545,8 +545,11 @@ void updateTempData() {
   }
 }
 
-int discTime = -1;
-int sendToSmallTime = -1;
+#define UNSET -1
+int discTime = UNSET;
+int sendToSmallTime = UNSET;
+#define TRIGGERED -2
+int elecCauldronTimeHyst = UNSET;
 void updateTime() {
   t = now();
   if (t != tLast) {
@@ -575,6 +578,12 @@ void updateTime() {
 //      Serial << "Отправка\n";
       Serial3.print("d*");
       Serial3 << 1 << "*" << chosenCauldron << "*" << chosenMode << "*" << csystemState << "*" << percents << "*" << int(T[SETDOM] * 10) << "*" << int(T[POD] * 10) << "*" << sendTime() << "*";
+    }
+
+    if (second() == elecCauldronTimeHyst) {
+      if (T[DOM] >= T[SETDOM]) elecCauldronTimeHyst = TRIGGERED;
+      else
+        elecCauldronTimeHyst = UNSET;         //Ставя его в UNSET, мы говорим программе поставить его еще раз, если это необходимо
     }
 
     if (hour() == 0 && minute() == 0 && second() == 0) {      //Если это новый день, то
@@ -989,6 +998,7 @@ void switchGasCauldron(bool state, bool isFull = false) {
 #define LOCAL false
 void switchElecCauldron(bool state, bool globalShutdown = true) {
   if (state) {
+    elecCauldronTimeHyst = UNSET;            //Для следующего момента, когда понадобится hyst
     csystemState = ACTIVE;
     if (!elecCauldronIsOn && !(activeHeat == REDHEAT && heatMode == GASHEAT)) {
       //Serial << "Выключаю газовый котел и включаю электро\n";
@@ -1041,6 +1051,11 @@ String sendTime() {       //Старая функция для сборки ст
   else return (String(hour()) + ":" + "0" + String(minute()));
 }
 
+void setTimer(int *timer, int seconds) {
+  *timer = second() + seconds;
+  if (*timer >= 60) *timer -= 60;
+}
+
 int starcnt;
 void checkSmallDevice() {
   starcnt = 0;
@@ -1078,24 +1093,24 @@ void checkSmallDevice() {
         //Serial3 /*<< String(timeOfTheDay) <<*/ << 1 << "*" << chosenCauldron << "*" << chosenMode << "*" << csystemState << "*" /*<< String(percents) <<*/ << 0 << "*" << int(T[SETDOM] * 10) << "*" << int(T[POD] * 10) << "*" << sendTime() << "*";
         ignoreSmallDevice = false;
         if (updateTime) {
-          discTime = second() + 15;
-          if (discTime >= 60) discTime -= 60;
+          setTimer(&discTime, 15);
 
-          sendToSmallTime = second() + 2;
-          if (sendToSmallTime >= 60) sendToSmallTime -= 60;
+          setTimer(&sendToSmallTime, 2);
         }
       }
     }
   }
 }
 
-void useHeat(byte type) {
+#define ONLYCALC true
+void useHeat(byte type, bool onlyCalc = false) {
   if (T[UL] >= 5) T[SETPOD] = 32;
   else if (T[UL] >= 0 && T[UL] <= 4) T[SETPOD] = 37;
   else if (T[UL] >= -5 && T[UL] <= -1) T[SETPOD] = 40;
   else if (T[UL] >= -8 && T[UL] <= -6) T[SETPOD] = 45;
   else if (T[UL] >= -12 && T[UL] <= -9) T[SETPOD] = 50;
   else if (T[UL] <= -13) T[SETPOD] = 55;
+  if (onlyCalc) return;
   if (type == GASHEAT)
     switchGasCauldron(true);
   else if (type == ELECTROHEAT)
@@ -1267,6 +1282,7 @@ void loop() {
       }
       else if (chosenMode == AUTO) {
         if (activeHeat == GREENHEAT) T[SETPOD] = 65.0;        //Чтобы проверка была корректной, если пришло время зеленого heat-a
+        if (activeHeat == REDHEAT) 
         
         if ((T[DOM] >= T[SETDOM] && activeHeat != REDHEAT) || T[POD] > T[SETPOD] + hyst) switchGasCauldron(false);
         else if (T[DOM] >= T[SETDOM] && activeHeat == REDHEAT && T[POD] < T[SETPOD] - hyst)    //Красный heat
@@ -1291,9 +1307,14 @@ void loop() {
         else if (T[POD] > T[SETPOD] + hyst) switchElecCauldron(false, LOCAL);
       }
       else if (chosenMode == AUTO) {
-        if (activeHeat == GREENHEAT) T[SETPOD] = 65.0;        //Чтобы проверка была корректной, если пришло время зеленого heat-a
+        if (activeHeat == GREENHEAT) T[SETPOD] = 65.0;          //Чтобы проверки были корректной, если пришло время heat-ов
+        if (activeHeat == REDHEAT) useHeat(heatMode, ONLYCALC); //ONLYCALC - только посчитать необходимую температуру, но не работать с котлами
         
-        if (T[DOM] >= T[SETDOM] && activeHeat != REDHEAT) switchElecCauldron(false);
+        //if (T[DOM] >= T[SETDOM] && activeHeat != REDHEAT) switchElecCauldron(false);
+        if (T[DOM] >= T[SETDOM] && activeHeat != REDHEAT) {
+          if (elecCauldronTimeHyst == UNSET) setTimer(&elecCauldronTimeHyst, 20);
+          else if (elecCauldronTimeHyst == TRIGGERED && elecCauldronIsOn) switchElecCauldron(false);
+        }
         else if (T[POD] > T[SETPOD] + hyst) switchElecCauldron(false, LOCAL);
         else if (T[DOM] >= T[SETDOM] && activeHeat == REDHEAT && T[POD] < T[SETPOD] - hyst)    //Красный heat
           useHeat(heatMode);
