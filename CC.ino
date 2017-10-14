@@ -36,7 +36,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "2.8.2-beta";
+String V = "2.8.3-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -571,30 +571,32 @@ void updateTime() {
     }
 
     if (!isConnectedToSmall && second() % 5 == 0) {  //Каждые пять секунд, если не подключены к маленькому
-      //            Serial << "?" << endl;
+      Serial << "?" << endl;
       Serial3.print("?*");
     }
 
     if (second() == discTime) {   //Если не было ответа какое-то время
-      //            Serial << "Отсоединение\n";
+//      Serial << second() << " " << discTime << endl;
+//      Serial << "Отсоединение\n";
+      sendToSmallTime = UNSET;
       isConnectedToSmall = false;
       ignoreSmallDevice = true;
       discTime = UNSET;
     }
     if (second() == sendToSmallTime) {
-      //            Serial << "Отправка\n";
+//      Serial << "Отправка\n";
       Serial3.print("d*");
       Serial3 << 1 << "*" << chosenCauldron << "*" << chosenMode << "*" << csystemState << "*" << percents << "*" << int(T[SETDOM] * 10) << "*" << int(T[POD] * 10) << "*" << sendTime() << "*";
       sendToSmallTime = UNSET;
     }
 
-    if (second() >= elecCauldronTimeHyst) {
+    if (second() == elecCauldronTimeHyst) {
       if (T[DOM] >= T[SETDOM]) elecCauldronTimeHyst = TRIGGERED;
       else
         elecCauldronTimeHyst = UNSET;         //Ставя его в UNSET, мы говорим программе поставить его еще раз, если это необходимо
     }
 
-    if (second() >= ledBlinkTimer) {
+    if (second() == ledBlinkTimer) {
       for (int i = 0; i < 3; i++) {
         if (blinkingLeds[i] == true) {
           switch (i) {
@@ -1084,8 +1086,6 @@ void switchElecCauldron(bool state, bool globalShutdown = true) {
     }
   }
   else if (globalShutdown) {
-    digitalWrite(elecPinPump, LOW);
-
     digitalWrite(elecPinLow, LOW);
     digitalWrite(elecPinHigh, LOW);
     if (elecCauldronIsOn) {
@@ -1096,6 +1096,7 @@ void switchElecCauldron(bool state, bool globalShutdown = true) {
       digitalWrite(elecPinStop, LOW);
       elecCauldronIsOn = false;
     }
+    digitalWrite(elecPinPump, LOW);
   }
   else {
     bool leds[] = {true, false, false};     //Красный
@@ -1133,10 +1134,14 @@ void checkSmallDevice() {
       }
       delay(50); //Иногда сообщение рвется, дадим задержку
     }
-    //        Serial << "Получено от маленького: " << msg << endl;
-    if (msg == "!") isConnectedToSmall = true;
+//    Serial << "Получено от маленького: " << msg << endl;
+    if (msg == "!") {
+      isConnectedToSmall = true;
+      setTimer(&discTime, 5);
+    }
     else {
       //Serial << "starcnt: " << starcnt << endl;
+      setTimer(&discTime, 5);
       bool updateTime = true;
       switch (starcnt) {
         case 1: if (useThermometers) T[DOM] = msg.toFloat() / 10; break;
@@ -1145,7 +1150,7 @@ void checkSmallDevice() {
         case 4: if (prevValues[2] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenMode," + String((msg.toInt() == AUTO ? "auto" : "manual"))); break;
         case 5: break;      //Просто игнорируем, осталось со старой системы
         case 6: break;      //Тоже самое
-        case 7: if (msg == "notupd") updateTime = false;
+        case 7: break; //if (msg == "notupd") updateTime = false;
         case 8: timeOfTheDay = msg.toInt();     //0 - день, 1 - ночь
       }
       //Старая система, нужно подстроится под старый стиль хранения в памяти данных
@@ -1153,11 +1158,9 @@ void checkSmallDevice() {
         //                Serial << "Данные получены" << endl;
         //Serial3 /*<< String(timeOfTheDay) <<*/ << 1 << "*" << chosenCauldron << "*" << chosenMode << "*" << csystemState << "*" /*<< String(percents) <<*/ << 0 << "*" << int(T[SETDOM] * 10) << "*" << int(T[POD] * 10) << "*" << sendTime() << "*";
         ignoreSmallDevice = false;
-        if (updateTime) {
-          setTimer(&discTime, 15);
+        setTimer(&discTime, 20);
 
-          setTimer(&sendToSmallTime, 2);
-        }
+        setTimer(&sendToSmallTime, 2);
       }
     }
   }
@@ -1346,7 +1349,7 @@ void loop() {
           if (activeHeat == GREENHEAT) T[SETPOD] = 65.0;          //Чтобы проверки были корректной, если пришло время heat-ов
           else if (activeHeat == REDHEAT) useHeat(heatMode, ONLYCALC); //ONLYCALC - только посчитать необходимую температуру, но не работать с котлами
           else calcAutoTemp();
-          switchGasCauldron(false);
+          switchGasCauldron(false, FULL);
         }
         else if (T[DOM] >= T[SETDOM] && activeHeat == REDHEAT && T[POD] < T[SETPOD] - hyst)    //Красный heat
           useHeat(heatMode);
