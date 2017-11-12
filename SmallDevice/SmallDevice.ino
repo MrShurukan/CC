@@ -57,11 +57,11 @@ int dayHour, nightHour;
 bool isConnected = false, isDone = false, isArrived = false, sentBefore = false, updatedBefore = false, sendSerial = true;//, ignoreFirstTime = true;
 
 int data[8] = {
-  0, 0, 1, 1, 1, 1, 0, 0
+  0, 0, EEPROM.read(20), EEPROM.read(21), 1, 1, 0, 0
 };
 
 int Data[2] = {
-  data[3], data[4]
+  data[2], data[3]
 };
 
 //DHT dht(3, DHT11);
@@ -93,6 +93,8 @@ bool ignoreMain = false;
 void updateSecondScreen();
 void updateThirdScreen();
 
+void updateMainScreen();
+
 void setup() {
   /*EEPROM.write(3, 1);
     EEPROM.write(4, 1);*/
@@ -104,14 +106,16 @@ void setup() {
     EEPROM.write(5, 22);*/
 
   /*EEPROM.put(0, 210);
-    EEPROM.put(4, 190);
-    EEPROM.put(8, 600);
-    EEPROM.put(12, 2200);*/
+  EEPROM.put(4, 190);
+  EEPROM.put(8, 600);
+  EEPROM.put(12, 2200);*/
 
   EEPROM.get(0, dayTemp);
   EEPROM.get(4, nightTemp);
   EEPROM.get(8, dayHour);
   EEPROM.get(12, nightHour);
+//  Data[0] = EEPROM.read(13);
+//  Data[1] = EEPROM.read(14);
   set = 300;
   // attachInterrupt(0, btn, FALLING);
   // put your setup code here, to run once:
@@ -133,6 +137,8 @@ void setup() {
   // antenna.print("Test7\n");
   //  antenna.print("Test8\n");
   //updateThirdScreen();
+  updateMainScreen();
+//  Serial << "data[2] and data[3]" << data[2] << " " << data[3] << endl;
 }
 
 void sendFF() {
@@ -318,7 +324,9 @@ void loop() {
       Serial << "qGas.picc=2";
       sendFF();
       if (data[2] < 1) Data[0] = 1;
-      else Data[0] = 0;/*
+      else Data[0] = 0;
+      EEPROM.update(20, Data[0]);
+      EEPROM.update(21, Data[1]);/*
       sensors.requestTemperatures();
       //        h = dht.readHumidity();
       t = getTemperature(insideThermometer);
@@ -419,6 +427,8 @@ void loop() {
           if (starcnt == 9) {
             Data[0] = data[2];
             Data[1] = data[3];
+            EEPROM.update(20, Data[0]);
+            EEPROM.update(21, Data[1]);
             if (ignoreMain) updateMainScreen();
             isArrived = true;
             starcnt = 0;
