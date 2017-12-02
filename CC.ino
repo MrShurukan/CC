@@ -36,7 +36,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "2.8.4-beta";
+String V = "2.8.5-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -600,7 +600,7 @@ void updateTime() {
 
     if (second() == redHeatElecTimeHyst) {
       if (T[DOM] < T[SETDOM]) redHeatElecTimeHyst = TRIGGERED;
-      else 
+      else
         redHeatElecTimeHyst = UNSET;
     }
 
@@ -832,9 +832,9 @@ void handleEncoderTurn(int dir) {         //Функция для обработ
   delay(50);    //Для того, чтобы убрать дребезг
 }
 
-void switchElecCauldron(bool state, bool globalShutdown = true);
+String switchElecCauldron(bool state, bool globalShutdown = true, bool forceSkip = false);
 #define FULL true
-void switchGasCauldron(bool state, bool isFull = false);
+String switchGasCauldron(bool state, bool isFull = false, bool forceSkip = false);
 
 void updateSelectedLine() {
   int lineSize = 220 / menuSize;
@@ -916,14 +916,19 @@ void encButtonPress() {         //Функция для обработки на�
   }
   delay(50);    //Для того, чтобы убрать дребезг
 }
+
+#define FORCE_SKIP true
+
 void switchCauldron() {
   makeBeep(75);   //Краткое пищание
 
   //Serial << "Смена котла\n";
   executeInConsole("changeValue chosenCauldron," + String((chosenCauldron == GAS ? "electro" : "gas")), HIDDEN, NO_LOG);
-  if (chosenCauldron == GAS && !(activeHeat == REDHEAT && heatMode == ELECTROHEAT)) switchElecCauldron(false);
-  else if (chosenCauldron == ELECTRO && !(activeHeat == REDHEAT && heatMode == GASHEAT)) switchGasCauldron(false, FULL);
+  if (chosenCauldron == GAS && !(activeHeat == REDHEAT && heatMode == ELECTROHEAT)) switchElecCauldron(false, false, FORCE_SKIP);
+  else if (chosenCauldron == ELECTRO && !(activeHeat == REDHEAT && heatMode == GASHEAT)) switchGasCauldron(false, FULL, FORCE_SKIP);
   log("Меняю котел на " + String((chosenCauldron == GAS ? "газовый" : "электрический")), WITH_SERIAL, CONSOLE);
+//  if (chosenCauldron == GAS) switchGasCauldron(true, true, FORCE_SKIP);
+//  else switchElecCauldron(true, false, FORCE_SKIP);
   sendTempCauldronData();
   ignoreSmallDevice = true;
   delay(50);    //Для того, чтобы убрать дребезг
@@ -1011,15 +1016,28 @@ void useLeds(bool leds[], bool blink = false) {
   }
 }
 
+
+int elecTimeHyst = 0;
+int gasTimeHyst = 0;
+
+bool gasCauldronWorking = false;
+bool elecCauldronWorking = false;
+
 int prevRequiredPin;
 //#define FULL true   Декларация перемещена наверх
-void switchGasCauldron(bool state, bool isFull = false) {
+//#define FORCE_SKIP true   Декларация перемещена наверх
+#define GASHYST 1000        //В (мс / 5) => это 5 секунд
+String switchGasCauldron(bool state, bool isFull = false, bool forceSkip = false) {
   if (state) {
+    gasCauldronWorking = true;
+    gasTimeHyst = 0;
+
+
     bool leds[] = {false, false, true};     //Синий
     useLeds(leds);
     if (elecCauldronIsOn && !(activeHeat == REDHEAT && heatMode == ELECTROHEAT)) {
       // Serial << "Выключаю электро котел и включаю газовый\n";
-      switchElecCauldron(false);
+      if (switchElecCauldron(false, true, forceSkip) == "waiting") return "waitingfor";
       elecCauldronIsOn = false;
     }
     csystemState = ACTIVE;
@@ -1049,6 +1067,19 @@ void switchGasCauldron(bool state, bool isFull = false) {
     }
   }
   else {
+    if (!forceSkip && gasCauldronWorking && isFull) {
+      gasTimeHyst++;
+      delay(5);
+
+      if (gasTimeHyst % 200 == 0) Serial << "Газ: прошла секунда таймера" << endl;
+
+      if (gasTimeHyst >= GASHYST) {
+        gasTimeHyst = 0;
+        Serial << "Таймер газа завершен" << endl;
+      }
+      else return "waiting";
+    }
+    gasCauldronWorking = false;
     if ((gasMode == PULSE && isFull) || gasMode != PULSE) {                   //Если это Pulse, то во время обычной работы не нужно выключать газовый котел совсем
       csystemState = INACTIVE;
       digitalWrite(gasPin, LOW);
@@ -1058,11 +1089,15 @@ void switchGasCauldron(bool state, bool isFull = false) {
     }
     else if (gasMode == PULSE && csystemState == INACTIVE) switchGasCauldron(true);      //Если было переключено на Pulse, когда температура tpod уже была выше tpodset
   }
+  return "OK";
 }
 
 #define LOCAL false
-void switchElecCauldron(bool state, bool globalShutdown = true) {
+#define ELECHYST 4000        //В (мс / 5) => это 20 секунд
+String switchElecCauldron(bool state, bool globalShutdown = true, bool forceSkip = false) {
   if (state) {
+    elecCauldronWorking = true;
+    elecTimeHyst = 0;
     bool leds[] = {true, false, false};     //Красный
     useLeds(leds);
 
@@ -1071,7 +1106,7 @@ void switchElecCauldron(bool state, bool globalShutdown = true) {
     if (!elecCauldronIsOn && !(activeHeat == REDHEAT && heatMode == GASHEAT)) {
       //Serial << "Выключаю газовый котел и включаю электро\n";
 
-      switchGasCauldron(false, FULL);
+      if (switchGasCauldron(false, FULL, forceSkip) == "waiting") return "waitingfor";
 
       digitalWrite(elecPinPump, HIGH);
 
@@ -1093,27 +1128,43 @@ void switchElecCauldron(bool state, bool globalShutdown = true) {
       digitalWrite(elecPinHigh, HIGH);
     }
   }
-  else if (globalShutdown) {
-    digitalWrite(elecPinLow, LOW);
-    digitalWrite(elecPinHigh, LOW);
-    if (elecCauldronIsOn) {
-      csystemState = INACTIVE;
-
-      digitalWrite(elecPinStop, HIGH);
-      delay(500);
-      digitalWrite(elecPinStop, LOW);
-      elecCauldronIsOn = false;
-    }
-    digitalWrite(elecPinPump, LOW);
-  }
   else {
-    bool leds[] = {true, false, false};     //Красный
-    useLeds(leds, BLINK);
+    if (!forceSkip && elecCauldronWorking) {
+      elecTimeHyst++;
+      delay(5);
 
-    csystemState = INACTIVE;
-    digitalWrite(elecPinLow, LOW);
-    digitalWrite(elecPinHigh, LOW);
+      if (elecTimeHyst % 200 == 0) Serial << "Электро: прошла секунда таймера" << endl;
+
+      if (elecTimeHyst >= ELECHYST) {
+        elecTimeHyst = 0;
+        Serial << "Таймер электро завершен" << endl;
+      }
+      else return "waiting";
+    }
+    elecCauldronWorking = false;
+    if (globalShutdown) {
+      digitalWrite(elecPinLow, LOW);
+      digitalWrite(elecPinHigh, LOW);
+      if (elecCauldronIsOn) {
+        csystemState = INACTIVE;
+
+        digitalWrite(elecPinStop, HIGH);
+        delay(500);
+        digitalWrite(elecPinStop, LOW);
+        elecCauldronIsOn = false;
+      }
+      digitalWrite(elecPinPump, LOW);
+    }
+    else {
+      bool leds[] = {true, false, false};     //Красный
+      useLeds(leds, BLINK);
+
+      csystemState = INACTIVE;
+      digitalWrite(elecPinLow, LOW);
+      digitalWrite(elecPinHigh, LOW);
+    }
   }
+  return "OK";
 }
 
 String sendTime() {       //Старая функция для сборки строки со временем
@@ -1375,7 +1426,8 @@ void loop() {
             useHeat(heatMode, ONLYCALC); //ONLYCALC - только посчитать необходимую температуру, но не работать с котлами
           }
           else calcAutoTemp();
-          switchGasCauldron(false, FULL);
+          if (T[POD] > T[SETPOD] + hyst) switchGasCauldron(false);
+          else switchGasCauldron(false, FULL);
         }
         else if (T[DOM] >= T[SETDOM] && activeHeat == REDHEAT && T[POD] < T[SETPOD] - hyst)    //Красный heat
           useHeat(heatMode);
