@@ -36,7 +36,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "2.9.0-beta";
+String V = "2.9.1-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -80,13 +80,13 @@ extern unsigned short redCoil[0x960];
 #define SETDOM 6
 
 double T[7] {
-  45.0,   //POD
-  20.0,   //OBR
-  20.0,   //TPOL
-  20.0,   //UL
-  19.0,   //DOM
-  EEPROM.read(3),   //SETPOD
-  EEPROM.read(4),   //SETDOM
+  49.3,//45.0,   //POD
+  34.5,//20.0,   //OBR
+  32.9,//20.0,   //TPOL
+  10.9,//20.0,   //UL
+  20.5,//19.0,   //DOM
+  45,//EEPROM.read(3),   //SETPOD
+  20.6//EEPROM.read(4),   //SETDOM
 };
 
 #define FORCE_AUTO_ADDRESSES false  //Если стоит в true, то вместо предустановленных адресов будут считываться новые автоматом
@@ -1069,7 +1069,7 @@ bool elecCauldronWorking = false;
 
 //#define FULL true   Декларация перемещена наверх
 //#define FORCE_SKIP true   Декларация перемещена наверх
-#define GASHYST 1000        //В (мс / 5) => это 5 секунд
+#define GASHYST 9000        //В (мс / 5) => это 45 секунд
 String switchGasCauldron(bool state, bool isFull = false, bool forceSkip = false) {
   //if (millis() % 1000 < 5) Serial << "GAS: " << millis() << ": state = " << state << " isFull = " << isFull << " forceSkip = " << forceSkip << "\n";
   if (state) {
@@ -1289,10 +1289,14 @@ void useHeat(byte type, bool onlyCalc = false) {
   else if (T[UL] >= -12 && T[UL] <= -9) T[SETPOD] = 50;
   else if (T[UL] <= -13) T[SETPOD] = 55;
   if (onlyCalc) return;
-  if (type == GASHEAT)
-    switchGasCauldron(true);
-  else if (type == ELECTROHEAT)
-    switchElecCauldron(true);
+  if (type == GASHEAT) {
+    if (T[POD] <= T[SETPOD] - hyst) switchGasCauldron(true);
+    else if (T[POD] >= T[SETPOD] + hyst) switchGasCauldron(false);
+  }
+  else if (type == ELECTROHEAT) {
+     if (T[POD] <= T[SETPOD] - hyst) switchElecCauldron(true);
+     else if (T[POD] >= T[SETPOD] + hyst) switchElecCauldron(false, LOCAL);
+  }
   else if (type == AUTOHEAT)
     if (chosenCauldron == GAS) switchGasCauldron(true);
     else if (chosenCauldron == ELECTRO) switchElecCauldron(true);
@@ -1307,7 +1311,7 @@ void calcAutoTemp() {
   //  Serial << "rawValue: " << rawValue << endl;
   //  Serial << "factor: " << factor << endl;
 
-  T[SETPOD] = rawValue * factor;
+  T[SETPOD] = int(rawValue * factor);
   //  Serial << "T[SETPOD]: " << T[SETPOD] << endl;
   if (T[SETPOD] > maxCauldronTemp) T[SETPOD] = maxCauldronTemp;
   if (T[SETPOD] < minCauldronTemp) T[SETPOD] = minCauldronTemp;
@@ -1498,10 +1502,18 @@ void loop() {
           else calcAutoTemp();
 
           if (T[DOM] < T[SETDOM]) {
+            /*if (millis() % 500 < 5) {
+              Serial << "T[DOM] < T[SETDOM]\n";
+              Serial << (T[POD] < T[SETPOD] - hyst) << " " << (T[POD] > T[SETPOD] + hyst) << endl;
+              Serial << T[SETPOD] - hyst << " " << T[POD] << " " << T[SETPOD] + hyst << endl;
+            }*/
             if (T[POD] < T[SETPOD] - hyst) switchElecCauldron(true);
             else if (T[POD] > T[SETPOD] + hyst) switchElecCauldron(false, LOCAL);
           }
-          else switchElecCauldron(false);
+          else {
+            switchElecCauldron(false);
+//            if (millis() % 500 < 5) Serial << "T[DOM] > T[SETDOM]\n";
+          }
         }
       }
     }
@@ -1590,7 +1602,7 @@ void loop() {
       }*/
 
     //Теплый пол
-    if (T[POD] >= 31 && activeHeat != GREENHEAT) digitalWrite(pinTPol, HIGH);
+    if (T[POD] >= 31 && activeHeat != GREENHEAT && csystemState != INACTIVE) digitalWrite(pinTPol, HIGH);
     else digitalWrite(pinTPol, LOW);
 
   }
