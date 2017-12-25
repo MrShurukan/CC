@@ -36,7 +36,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "2.9.1-beta";
+String V = "2.9.2-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -80,13 +80,13 @@ extern unsigned short redCoil[0x960];
 #define SETDOM 6
 
 double T[7] {
-  49.3,//45.0,   //POD
-  34.5,//20.0,   //OBR
-  32.9,//20.0,   //TPOL
-  10.9,//20.0,   //UL
-  20.5,//19.0,   //DOM
-  45,//EEPROM.read(3),   //SETPOD
-  20.6//EEPROM.read(4),   //SETDOM
+  45.0,   //POD
+  20.0,   //OBR
+  20.0,   //TPOL
+  20.0,   //UL
+  19.0,   //DOM
+  EEPROM.read(3),   //SETPOD
+  EEPROM.read(4),   //SETDOM
 };
 
 #define FORCE_AUTO_ADDRESSES false  //Если стоит в true, то вместо предустановленных адресов будут считываться новые автоматом
@@ -1291,11 +1291,19 @@ void useHeat(byte type, bool onlyCalc = false) {
   if (onlyCalc) return;
   if (type == GASHEAT) {
     if (T[POD] <= T[SETPOD] - hyst) switchGasCauldron(true);
-    else if (T[POD] >= T[SETPOD] + hyst) switchGasCauldron(false);
+    else if (T[POD] >= T[SETPOD] + hyst) {
+      switchGasCauldron(false);
+      switchElecCauldron(false);
+    }
+    //else switchElecCauldron(false);
   }
   else if (type == ELECTROHEAT) {
-     if (T[POD] <= T[SETPOD] - hyst) switchElecCauldron(true);
-     else if (T[POD] >= T[SETPOD] + hyst) switchElecCauldron(false, LOCAL);
+    if (T[POD] <= T[SETPOD] - hyst) switchElecCauldron(true);
+    else if (T[POD] >= T[SETPOD] + hyst) {
+      switchElecCauldron(false, LOCAL);
+      switchGasCauldron(false, FULL);
+    }
+     //else switchGasCauldron(false, FULL);
   }
   else if (type == AUTOHEAT)
     if (chosenCauldron == GAS) switchGasCauldron(true);
@@ -1452,7 +1460,6 @@ void loop() {
     //Красный heat
     if (chosenMode == AUTO && T[UL] <= 10 && heatMode != HEATOFF && T[DOM] >= T[SETDOM]) {
       activeHeat = REDHEAT;
-      //useHeat(heatMode, ONLYCALC);  //ONLYCALC - только посчитать необходимую температуру, но не работать с котлами
     }
     else if (T[OBR] <= 30 && chosenMode == AUTO) {
       activeHeat = GREENHEAT;  //Зеленый Heat
@@ -1602,7 +1609,7 @@ void loop() {
       }*/
 
     //Теплый пол
-    if (T[POD] >= 31 && activeHeat != GREENHEAT && csystemState != INACTIVE) digitalWrite(pinTPol, HIGH);
+    if (T[POD] >= 31 && activeHeat != GREENHEAT && (elecCauldronWorking || gasCauldronWorking)) digitalWrite(pinTPol, HIGH);
     else digitalWrite(pinTPol, LOW);
 
   }
