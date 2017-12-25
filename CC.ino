@@ -36,7 +36,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "2.9.2-beta";
+String V = "2.9.3-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -179,6 +179,8 @@ bool mainScreenUpdates = true;  //Иногда нужно останавлива
 bool elecCauldronIsOn = false;
 bool pulseIsOn = false;
 bool greenHeatIsOn = false;
+
+bool isCompletelyTurnedOff = true;
 
 bool ignoreSmallDevice = true;
 
@@ -1073,6 +1075,7 @@ bool elecCauldronWorking = false;
 String switchGasCauldron(bool state, bool isFull = false, bool forceSkip = false) {
   //if (millis() % 1000 < 5) Serial << "GAS: " << millis() << ": state = " << state << " isFull = " << isFull << " forceSkip = " << forceSkip << "\n";
   if (state) {
+    isCompletelyTurnedOff = false;
     gasCauldronWorking = true;
     if (gasTimeHyst != 0) printRus(tft, String("      "), 150, 170);
     gasTimeHyst = 0;
@@ -1127,11 +1130,19 @@ String switchGasCauldron(bool state, bool isFull = false, bool forceSkip = false
         pulseIsOn = false;
       }
 
+      isCompletelyTurnedOff = true;
+
       bool leds[] = {false, false, true};     //Синий
       useLeds(leds, BLINK);
     }
-    else if (gasMode == PULSE && csystemState == INACTIVE) switchGasCauldron(true);      //Если было переключено на Pulse, когда температура tpod уже была выше tpodset
-    else if (gasMode == PULSE) tweakPulse();
+    else if (gasMode == PULSE && csystemState == INACTIVE) {
+      switchGasCauldron(true);      //Если было переключено на Pulse, когда температура tpod уже была выше tpodset
+      isCompletelyTurnedOff = false;
+    }
+    else if (gasMode == PULSE) {
+      isCompletelyTurnedOff = false;
+      tweakPulse();
+    }
   }
   return "OK";
 }
@@ -1141,6 +1152,7 @@ String switchGasCauldron(bool state, bool isFull = false, bool forceSkip = false
 String switchElecCauldron(bool state, bool globalShutdown = true, bool forceSkip = false) {
   //if (millis() % 1000 < 5) Serial << "ELEC: " << millis() << ": state = " << state << " globalShutdown = " << globalShutdown << " forceSkip = " << forceSkip << "\n";
   if (state) {
+    isCompletelyTurnedOff = false;
     elecCauldronWorking = true;
     if (elecTimeHyst != 0) printRus(tft, String("      "), 150, 170);
     elecTimeHyst = 0;
@@ -1196,6 +1208,7 @@ String switchElecCauldron(bool state, bool globalShutdown = true, bool forceSkip
     }
     elecCauldronWorking = false;
     if (globalShutdown) {
+      isCompletelyTurnedOff = true;
       digitalWrite(elecPinLow, LOW);
       digitalWrite(elecPinHigh, LOW);
       if (elecCauldronIsOn) {
@@ -1213,6 +1226,7 @@ String switchElecCauldron(bool state, bool globalShutdown = true, bool forceSkip
       useLeds(leds, BLINK);
 
       csystemState = INACTIVE;
+      isCompletelyTurnedOff = false;
       digitalWrite(elecPinLow, LOW);
       digitalWrite(elecPinHigh, LOW);
     }
@@ -1609,7 +1623,7 @@ void loop() {
       }*/
 
     //Теплый пол
-    if (T[POD] >= 31 && activeHeat != GREENHEAT && (elecCauldronWorking || gasCauldronWorking)) digitalWrite(pinTPol, HIGH);
+    if (T[POD] >= 31 && activeHeat != GREENHEAT && !isCompletelyTurnedOff) digitalWrite(pinTPol, HIGH);
     else digitalWrite(pinTPol, LOW);
 
   }
