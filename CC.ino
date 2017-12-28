@@ -36,7 +36,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "2.9.3-beta";
+String V = "2.9.4-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -1187,7 +1187,7 @@ String switchElecCauldron(bool state, bool globalShutdown = true, bool forceSkip
     }
   }
   else {
-    if (!forceSkip && elecCauldronWorking && globalShutdown) {
+    if (!forceSkip && !isCompletelyTurnedOff && globalShutdown) {
       elecTimeHyst++;
       delay(5);
 
@@ -1314,8 +1314,8 @@ void useHeat(byte type, bool onlyCalc = false) {
   else if (type == ELECTROHEAT) {
     if (T[POD] <= T[SETPOD] - hyst) switchElecCauldron(true);
     else if (T[POD] >= T[SETPOD] + hyst) {
-      switchElecCauldron(false, LOCAL);
       switchGasCauldron(false, FULL);
+      switchElecCauldron(false, LOCAL);
     }
      //else switchGasCauldron(false, FULL);
   }
@@ -1625,7 +1625,6 @@ void loop() {
     //Теплый пол
     if (T[POD] >= 31 && activeHeat != GREENHEAT && !isCompletelyTurnedOff) digitalWrite(pinTPol, HIGH);
     else digitalWrite(pinTPol, LOW);
-
   }
   else {
     bool leds[] = {false, true, false};     //Зеленый
