@@ -94,6 +94,10 @@ void analizeClientMessage(String request) {
   else if (request == "hook") msgMainDevice("hook"); //Запрос "подцепить" консоль
   else if (request == "unhook") msgMainDevice("unhook"); //Запрос "отцепить" консоль
   else if (request == "requestData") msgMainDevice("requestData"); //Запрос о данных котла и температур
+  else if (request.startsWith("setDom`")) {
+//    request = request.substring(request.indexOf("`") + 1);
+    msgMainDevice(request); 
+  }
 }
 
 void loop() {

@@ -106,16 +106,16 @@ void setup() {
     EEPROM.write(5, 22);*/
 
   /*EEPROM.put(0, 210);
-  EEPROM.put(4, 190);
-  EEPROM.put(8, 600);
-  EEPROM.put(12, 2200);*/
+    EEPROM.put(4, 190);
+    EEPROM.put(8, 600);
+    EEPROM.put(12, 2200);*/
 
   EEPROM.get(0, dayTemp);
   EEPROM.get(4, nightTemp);
   EEPROM.get(8, dayHour);
   EEPROM.get(12, nightHour);
-//  Data[0] = EEPROM.read(13);
-//  Data[1] = EEPROM.read(14);
+  //  Data[0] = EEPROM.read(13);
+  //  Data[1] = EEPROM.read(14);
   set = 300;
   // attachInterrupt(0, btn, FALLING);
   // put your setup code here, to run once:
@@ -138,7 +138,7 @@ void setup() {
   //  antenna.print("Test8\n");
   //updateThirdScreen();
   updateMainScreen();
-//  Serial << "data[2] and data[3]" << data[2] << " " << data[3] << endl;
+  //  Serial << "data[2] and data[3]" << data[2] << " " << data[3] << endl;
 }
 
 void sendFF() {
@@ -185,35 +185,35 @@ void updateMainScreen() {
   //  Serial << "nightMinutes: " << nightMinutes << endl;
 
   if (currHours >= dayHours && currHours <= nightHours) {
-//    Serial << "Yiii\n";
+    //    Serial << "Yiii\n";
     if (currHours == dayHours) {
       if (currMinutes >= dayMinutes) {
         timeOfTheDay = 0;
-//        Serial << "IT'SA DAY\n";
+        //        Serial << "IT'SA DAY\n";
       }
       else {
         timeOfTheDay = 1;
-//        Serial << "IT'SA NIGHT\n";
+        //        Serial << "IT'SA NIGHT\n";
       }
     }
     else if (currHours == nightHours) {
       if (currMinutes < nightMinutes) {
         timeOfTheDay = 0;
-//        Serial << "IT'SA DAY\n";
+        //        Serial << "IT'SA DAY\n";
       }
       else {
         timeOfTheDay = 1;
-//        Serial << "IT'SA NIGHT\n";
+        //        Serial << "IT'SA NIGHT\n";
       }
     }
     else {
       timeOfTheDay = 0;
-//      Serial << "IT'SA DAY\n";
+      //      Serial << "IT'SA DAY\n";
     }
   }
   else {
     timeOfTheDay = 1;
-//    Serial << "IT'SA NIGHT\n";
+    //    Serial << "IT'SA NIGHT\n";
   }
 
   Serial << "qDay.picc=" << /*data[1];*/timeOfTheDay; sendFF();
@@ -393,7 +393,7 @@ void loop() {
           updateSecondScreen();
           updateThirdScreen();
           //antenna.println("CONNECTED!");
-//          Serial << "\n" << "Connected!";
+          //          Serial << "\n" << "Connected!";
         }
       }
     }
@@ -418,21 +418,38 @@ void loop() {
       if (!isArrived) {
         if (antenna.available() > 0) {
           buff = antenna.readStringUntil('*');
-//          Serial << "\n" << starcnt << " " << buff << "*";
+          //          Serial << "\n" << starcnt << " " << buff << "*";
           delay(50);
           if (buff.startsWith("?")) resetFunc();
-          if (starcnt != 8) data[starcnt] = buff.toInt();
-          else Time = buff; //antenna.println(Time);
-          starcnt++;
-          if (starcnt == 9) {
-            Data[0] = data[2];
-            Data[1] = data[3];
-            EEPROM.update(20, Data[0]);
-            EEPROM.update(21, Data[1]);
-            if (ignoreMain) updateMainScreen();
-            isArrived = true;
-            starcnt = 0;
-//            Serial << "\n" << "Got data!";
+          else if (buff.startsWith("setDom`")) {
+            buff = buff.substring(buff.indexOf('`') + 1);
+
+
+            if (timeOfTheDay == 0) {        //День
+              dayTemp = int(buff.toFloat() * 10);
+//              Serial << dayTemp << endl;
+              EEPROM.put(0, dayTemp);
+            }
+            else {
+              nightTemp = int(buff.toFloat() * 10);
+//              Serial << nightTemp << endl;
+              EEPROM.put(4, nightTemp);
+            }
+          }
+          else {
+            if (starcnt != 8) data[starcnt] = buff.toInt();
+            else Time = buff; //antenna.println(Time);
+            starcnt++;
+            if (starcnt == 9) {
+              Data[0] = data[2];
+              Data[1] = data[3];
+              EEPROM.update(20, Data[0]);
+              EEPROM.update(21, Data[1]);
+              if (ignoreMain) updateMainScreen();
+              isArrived = true;
+              starcnt = 0;
+              //            Serial << "\n" << "Got data!";
+            }
           }
         }
         //antenna.println(starcnt);
@@ -448,7 +465,7 @@ void loop() {
       /*updateSecondScreen();
         updateThirdScreen();*/
       //antenna.println(" DISCNTD!");
-//      Serial << "\n" << "Disconnected!";
+      //      Serial << "\n" << "Disconnected!";
     }
     isArrived = false;
     sentBefore = false;

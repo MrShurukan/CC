@@ -36,7 +36,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "2.9.4-beta";
+String V = "2.9.5-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -527,6 +527,12 @@ void checkESPInput() {
     }
     else if (serialMsg == "requestData") {
       sendTempCauldronData();
+    }
+    else if (serialMsg.startsWith("setDom`")) {
+      serialMsg = serialMsg.substring(serialMsg.indexOf("`") + 1);
+
+      executeInConsole("changeValue tsetdom," + serialMsg);
+      Serial3 << "setDom`" << serialMsg << "*";
     }
 
     serialMsg = "";
@@ -1297,11 +1303,12 @@ void useHeat(byte type, bool onlyCalc = false) {
   //if (millis() % 1000 == 0) Serial << millis() << ": type = " << type << " onlyCalc = " << onlyCalc << endl;
 
   if (T[UL] >= 7) T[SETPOD] = 32;
-  else if (T[UL] >= 0 && T[UL] <= 7) T[SETPOD] = 37;
-  else if (T[UL] >= -5 && T[UL] <= -1) T[SETPOD] = 40;
-  else if (T[UL] >= -8 && T[UL] <= -6) T[SETPOD] = 45;
-  else if (T[UL] >= -12 && T[UL] <= -9) T[SETPOD] = 50;
-  else if (T[UL] <= -13) T[SETPOD] = 55;
+  else if (T[UL] >= 2 && T[UL] <= 7) T[SETPOD] = 37;
+  else if (T[UL] >= -1 && T[UL] <= 1) T[SETPOD] = 40;
+  else if (T[UL] >= -5 && T[UL] <= -2) T[SETPOD] = 45;
+  else if (T[UL] >= -8 && T[UL] <= -6) T[SETPOD] = 50;
+  else if (T[UL] >= -12 && T[UL] <= -9) T[SETPOD] = 55;
+  else if (T[UL] <= -13) T[SETPOD] = 60;
   if (onlyCalc) return;
   if (type == GASHEAT) {
     if (T[POD] <= T[SETPOD] - hyst) switchGasCauldron(true);
