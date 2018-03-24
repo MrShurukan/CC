@@ -1,5 +1,11 @@
 #include <math.h>
 #include <EEPROM.h>
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+
+RF24 module(2, 5);  // CE, CS
+const byte addresses[][6] = {"1Node", "2Node"};
 
 #include <Streaming.h>
 #include <OneWire.h>
@@ -119,10 +125,10 @@ void setup() {
   set = 300;
   // attachInterrupt(0, btn, FALLING);
   // put your setup code here, to run once:
-  antenna.begin(2400);
+  //antenna.begin(2400);
   //antenna << "Test1" << "\n";
   Serial.begin(9600);
-  //Serial << "\n";
+  //Serial << "\nReset\n";
   while (antenna.available() > 0) antenna.read();
   // antenna.print("Test2\n");
   //  dht.begin();
@@ -139,6 +145,16 @@ void setup() {
   //updateThirdScreen();
   updateMainScreen();
   //  Serial << "data[2] and data[3]" << data[2] << " " << data[3] << endl;
+
+
+
+  module.begin();
+  // Serial << "Модуль "<< (module.isChipConnected() ? "подключен к шине" : "отключен от шины") << " SPI\n";
+
+  module.openWritingPipe(addresses[1]); // 2Node
+  module.openReadingPipe(1, addresses[0]); // 1Node
+  module.setPALevel(RF24_PA_HIGH);
+  module.startListening();
 }
 
 void sendFF() {
@@ -264,13 +280,32 @@ void flushMsg() {
   for (int i = 0; i < 7; i++) msg[i] = 0;
 }
 
+void moduleSend(String s) {
+  module.stopListening();
+  //Serial << "\nОтправка: " << s << "\n";
+  //Serial << s.c_str() << " (" << sizeof(s.c_str()) << ") (" << s.length() << ")\n";
+  module.write(s.c_str(), s.length());
+  module.startListening();
+}
+
 void loop() {
   // put your main code here, to run repeatedly
   //Serial.print("LOOP");
+  if (Serial.available()) delay(100);
   while (Serial.available() > 0) {
-    msg[index++] = char(Serial.read());
+    char c = char(Serial.read());
+    msg[index++] = c;
+
+    //Serial << "Got stuff: " << c;
   }
-  index = 0;
+  if (index != 0) {
+    /*Serial << "\nMSG: ";
+    for (int i = 0; i < index; i++) {
+      Serial << msg[i];
+    }
+    Serial << "\n";*/
+    index = 0;
+  }
   //antenna.println(msg[2]);
   if (msg[1] == 2) {
     if (msg[2] == 3) {
@@ -384,9 +419,14 @@ void loop() {
 
   if (!isConnected) {
     if (sendSerial) {
-      if (antenna.available() > 0) {
-        if (antenna.readStringUntil('*') == "?" ) {
-          antenna.print("!*");
+      if (module.available()) {
+        // Serial << "\nAVAILABLE!\n";
+        delay(20);
+        char r_message[100];
+        module.read(&r_message, sizeof(r_message));
+        if (String(r_message) == "?*") {
+          delay(100);
+          moduleSend("!*");
           starcnt = 0;
           isConnected = true;
           updateMainScreen();
@@ -404,10 +444,16 @@ void loop() {
         sensors.requestTemperatures();
         //        h = dht.readHumidity();
         t = getTemperature(insideThermometer);
-        antenna << t << "*";
-        if (timeOfTheDay == 1) antenna << nightTemp;
-        else antenna << dayTemp;
-        antenna << "*" << Data[0] << "*" << Data[1] << "*" << dayHour << "*" << nightHour << "*" << "notupd" << "*" << timeOfTheDay << "*";
+        String msg = "";
+        msg += String(t) + "*";
+        if (timeOfTheDay == 1) msg += String(nightTemp);
+        else msg += String(dayTemp);
+        msg += "*" + String(Data[0]) + "*" + String(Data[1]) + "*" + String(dayHour) + "*" + String(nightHour) + "*" + "notupd" + "*" + String(timeOfTheDay) + "*";
+        moduleSend(msg);
+        /*module.stopListening();
+        char toSend[] = "228*197*1*1*600*2200*notupd*1*";
+        module.write(toSend, sizeof(toSend));
+        module.startListening();*/
         //updateMainScreen();
         sentBefore = true;
         ignoreMain = false;
@@ -416,59 +462,82 @@ void loop() {
     cnt++;
     if (sendSerial) {
       if (!isArrived) {
-        if (antenna.available() > 0) {
-          buff = antenna.readStringUntil('*');
-          //          Serial << "\n" << starcnt << " " << buff << "*";
-          delay(50);
-          if (buff.startsWith("?")) resetFunc();
-          else if (buff.startsWith("setDom`")) {
-            buff = buff.substring(buff.indexOf('`') + 1);
+        if (module.available()) {
+          char r_message[100];
+          module.read(&r_message, sizeof(r_message));
+          String msg = String(r_message);
+
+          //Serial << "\nПолучил: " << msg << "\n";
+          delay(20);
+
+          while (msg.length() > 0) {
+            String buff = "";
+            int len = 0;
+            for (int i = 0; i < msg.length(); i++) {
+              if (msg[i] != '*') {
+                buff += msg[i];
+                len++;
+              }
+              else break;
+            }
+            if (buff.startsWith("?")) {
+              // resetFunc();
+              //Serial << "\nWhat the hell\n";
+              delay(20);
+              isConnected = false;
+              sentBefore = false;
+              return;
+            }
+            else if (buff.startsWith("setDom`")) {
+              buff = buff.substring(buff.indexOf('`') + 1);
 
 
-            if (timeOfTheDay == 0) {        //День
-              dayTemp = int(buff.toFloat() * 10);
-//              Serial << dayTemp << endl;
-              EEPROM.put(0, dayTemp);
+              if (timeOfTheDay == 0) {        //День
+                dayTemp = int(buff.toFloat() * 10);
+                // Serial << dayTemp << endl;
+                EEPROM.put(0, dayTemp);
+              }
+              else {
+                nightTemp = int(buff.toFloat() * 10);
+                // Serial << nightTemp << endl;
+                EEPROM.put(4, nightTemp);
+              }
             }
             else {
-              nightTemp = int(buff.toFloat() * 10);
-//              Serial << nightTemp << endl;
-              EEPROM.put(4, nightTemp);
+              if (starcnt != 8) data[starcnt] = buff.toInt();
+              else Time = buff; //antenna.println(Time);
+              starcnt++;
+              if (starcnt == 9) {
+                Data[0] = data[2];
+                Data[1] = data[3];
+                EEPROM.update(20, Data[0]);
+                EEPROM.update(21, Data[1]);
+                if (ignoreMain) updateMainScreen();
+                isArrived = true;
+                starcnt = 0;
+                //            Serial << "\n" << "Got data!";
+              }
             }
-          }
-          else {
-            if (starcnt != 8) data[starcnt] = buff.toInt();
-            else Time = buff; //antenna.println(Time);
-            starcnt++;
-            if (starcnt == 9) {
-              Data[0] = data[2];
-              Data[1] = data[3];
-              EEPROM.update(20, Data[0]);
-              EEPROM.update(21, Data[1]);
-              if (ignoreMain) updateMainScreen();
-              isArrived = true;
-              starcnt = 0;
-              //            Serial << "\n" << "Got data!";
-            }
+
+            msg = msg.substring(len + 1);
           }
         }
-        //antenna.println(starcnt);
       }
     }
-  }
-  delay(50);
-  if (cnt == 200) {      //10 сек
-    cnt = 0;
-    if (!isArrived) {
-      isConnected = false;
-      updateMainScreen();
-      /*updateSecondScreen();
-        updateThirdScreen();*/
-      //antenna.println(" DISCNTD!");
-      //      Serial << "\n" << "Disconnected!";
+    delay(50);
+    if (cnt == 200) {      //10 сек
+      cnt = 0;
+      if (!isArrived) {
+        isConnected = false;
+        updateMainScreen();
+        /*updateSecondScreen();
+          updateThirdScreen();*/
+        //antenna.println(" DISCNTD!");
+        //      Serial << "\n" << "Disconnected!";
+      }
+      isArrived = false;
+      sentBefore = false;
     }
-    isArrived = false;
-    sentBefore = false;
   }
 }
 

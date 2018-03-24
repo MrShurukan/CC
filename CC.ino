@@ -14,6 +14,12 @@ File myFile;        //Переменная для работы с файлом �
 //Пины модуля реального времени:  RST, DAT, CLK
 DS1302RTC RTC(5, 6, 7);
 
+#include <nRF24L01.h>
+#include <RF24.h>
+
+RF24 module(11, 12);  // CE, CS
+const byte module_addresses[][6] = {"1Node", "2Node"};
+
 //Переменные для работы с часами реального времени
 time_t tLast;
 time_t t;
@@ -36,7 +42,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "2.9.6-beta";
+String V = "3.0.0-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -532,7 +538,7 @@ void checkESPInput() {
       serialMsg = serialMsg.substring(serialMsg.indexOf("`") + 1);
 
       executeInConsole("changeValue tsetdom," + serialMsg);
-      Serial3 << "setDom`" << serialMsg << "*";
+      moduleSend("setDom`" + serialMsg + "*");
     }
 
     serialMsg = "";
@@ -574,6 +580,7 @@ void updateTime() {
     if (second() == 0) {      //Каждую новую минуту
       redrawTime();     //Рисовать новое текущее время в углу
       //      if (discTime >= 60) discTime -= 60;   //Т.к. время отсоединения - минута
+//      Serial << "Текущая секунда:" << second() << "\n";
     }
 
     if (second() % thermometersRefreshRate == 0) {    //Каждые thermometersRefreshRate секунд
@@ -582,7 +589,7 @@ void updateTime() {
 
     if (!isConnectedToSmall && second() % 5 == 0) {  //Каждые пять секунд, если не подключены к маленькому
       Serial << "?" << endl;
-      Serial3.print("?*");
+      moduleSend("?*");
     }
 
     if (second() == discTime) {   //Если не было ответа какое-то время
@@ -595,8 +602,8 @@ void updateTime() {
     }
     if (second() == sendToSmallTime) {
       //      Serial << "Отправка\n";
-      Serial3.print("d*");
-      Serial3 << 1 << "*" << chosenCauldron << "*" << chosenMode << "*" << csystemState << "*" << percents << "*" << int(T[SETDOM] * 10) << "*" << int(T[POD] * 10) << "*" << sendTime() << "*";
+      moduleSend("d*");
+      moduleSend(String(1) + "*" + String(chosenCauldron) + "*" + String(chosenMode) + "*" + String(csystemState) + "*" + String(percents) + "*" + String(int(T[SETDOM] * 10)) + "*" + String(int(T[POD] * 10)) + "*" + String(sendTime()) + "*");
       sendToSmallTime = UNSET;
     }
 
@@ -1250,49 +1257,70 @@ void setTimer(int *timer, int seconds) {
   if (*timer >= 60) *timer -= 60;
 }
 
+void moduleSend(String s) {
+  module.stopListening();
+  //Serial << "Отправляю: " << s << "\n";
+  module.write(s.c_str(), s.length());
+  module.startListening();
+}
+
 int starcnt;
 void checkSmallDevice() {
   starcnt = 0;
-  while (Serial3.available()) {
-    String msg = "";
-    char c;
-    while (Serial3.available()) {
-      c = Serial3.read();
-      if (c != '*')
-        msg += c;
-      else {
-        starcnt++;
+  if (module.available()) {
+    char r_message[100];
+    module.read(&r_message, sizeof(r_message));
+
+    //Serial << "Получено сообщение от маленького: " << r_message << "\n";
+    //delay(200);
+
+    String message = String(r_message);
+    while (message.length() > 0) {
+      String msg = "";
+      char c;
+      int len = 0;
+      for (int i = 0; i < message.length(); i++) {
+        c = message[i];
+        if (c != '*') {
+          msg += c;
+          len++;
+        }
+        else {
+          starcnt++;
+          break;
+        }
+      }
+      message = message.substring(len + 1);
+      if (msg == "!") {
+        Serial << "!\n";
+        isConnectedToSmall = true;
+        setTimer(&discTime, 15);
         break;
       }
-      delay(50); //Иногда сообщение рвется, дадим задержку
-    }
-    //    Serial << "Получено от маленького: " << msg << endl;
-    if (msg == "!") {
-      isConnectedToSmall = true;
-      setTimer(&discTime, 5);
-    }
-    else {
-      //Serial << "starcnt: " << starcnt << endl;
-      setTimer(&discTime, 5);
-      bool updateTime = true;
-      switch (starcnt) {
-        case 1: if (useThermometers) T[DOM] = msg.toFloat() / 10; break;
-        case 2: if (useThermometers) T[SETDOM] = msg.toFloat() / 10; break;
-        case 3: if (prevValues[1] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenCauldron," + String((msg.toInt() == GAS ? "gas" : "electro"))); break;
-        case 4: if (prevValues[2] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenMode," + String((msg.toInt() == AUTO ? "auto" : "manual"))); break;
-        case 5: break;      //Просто игнорируем, осталось со старой системы
-        case 6: break;      //Тоже самое
-        case 7: break; //if (msg == "notupd") updateTime = false;
-        case 8: timeOfTheDay = msg.toInt();     //0 - день, 1 - ночь
-      }
-      //Старая система, нужно подстроится под старый стиль хранения в памяти данных
-      if (starcnt == 8) {
-        //                Serial << "Данные получены" << endl;
-        //Serial3 /*<< String(timeOfTheDay) <<*/ << 1 << "*" << chosenCauldron << "*" << chosenMode << "*" << csystemState << "*" /*<< String(percents) <<*/ << 0 << "*" << int(T[SETDOM] * 10) << "*" << int(T[POD] * 10) << "*" << sendTime() << "*";
-        ignoreSmallDevice = false;
-        setTimer(&discTime, 20);
-
-        setTimer(&sendToSmallTime, 2);
+      else {
+        if (!isConnectedToSmall) break;
+        //Serial << "starcnt: " << starcnt << endl;
+        setTimer(&discTime, 5);
+        bool updateTime = true;
+        switch (starcnt) {
+          case 1: if (useThermometers) T[DOM] = msg.toFloat() / 10; break;
+          case 2: if (useThermometers) T[SETDOM] = msg.toFloat() / 10; break;
+          case 3: if (prevValues[1] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenCauldron," + String((msg.toInt() == GAS ? "gas" : "electro"))); break;
+          case 4: if (prevValues[2] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenMode," + String((msg.toInt() == AUTO ? "auto" : "manual"))); break;
+          case 5: break;      //Просто игнорируем, осталось со старой системы
+          case 6: break;      //Тоже самое
+          case 7: break; //if (msg == "notupd") updateTime = false;
+          case 8: timeOfTheDay = msg.toInt();     //0 - день, 1 - ночь
+        }
+        //Старая система, нужно подстроится под старый стиль хранения в памяти данных
+        if (starcnt == 8) {
+          //                Serial << "Данные получены" << endl;
+          //Serial3 /*<< String(timeOfTheDay) <<*/ << 1 << "*" << chosenCauldron << "*" << chosenMode << "*" << csystemState << "*" /*<< String(percents) <<*/ << 0 << "*" << int(T[SETDOM] * 10) << "*" << int(T[POD] * 10) << "*" << sendTime() << "*";
+          ignoreSmallDevice = false;
+          setTimer(&discTime, 20);
+  
+          setTimer(&sendToSmallTime, 3);
+        }
       }
     }
   }
@@ -1353,10 +1381,21 @@ void setup() {
   /*Дефолтная инициализация*/
   Serial.begin(9600);
   //Serial1.begin(9600);
-  Serial3.begin(2400);    //"Маленькое" устройство
+  //Serial3.begin(2400);    //"Маленькое" устройство
+  
   setSyncProvider(RTC.get);         //Автоматическая синхронизация с часами каждые пять минут
   Serial << "Добро пожаловать в CauldronContol от IZ-Software! (v" << V << ")\n\n";
   Serial << "Инициализация...\n";
+
+  module.begin();     //"Маленькое" устройство
+  
+  module.openWritingPipe(module_addresses[0]); // 1Node
+  module.openReadingPipe(1, module_addresses[1]); // 2Node
+  module.setPALevel(RF24_PA_HIGH);
+
+  module.startListening();
+  
+  Serial << "Радиомодуль "<< (module.isChipConnected() ? "подключен к шине" : "отключен от шины") << " SPI\n";
 
   pinMode(pin_A, INPUT);
   pinMode(pin_B, INPUT);
@@ -1455,7 +1494,7 @@ void setup() {
 
 
   /*Начальная отрисовка*/
-  updateMainScreen(REDRAW);         //Параметр REDRAW (true) сообщает, что нужно перерисовать все, не смотря на то, что все и так уже отрисовано
+  updateMainScreen(REDRAW);         //Параметр REDRAW (true) сообщает, что нужно перерисовать все, несмотря на то, что все и так уже отрисовано
   Serial << "Начальный экран отрисован успешно!";
   /*Начальная отрисовка завершена*/
 
