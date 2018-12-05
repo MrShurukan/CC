@@ -42,7 +42,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "3.0.0-beta";
+String V = "3.1.0-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -165,6 +165,10 @@ int gasMode = EEPROM.read(7);    //prevValues[7]
 #define ELECTROHEAT 3
 int heatMode = EEPROM.read(8);
 
+// Мы совершаем умножение на десять, так как не можем хранить все 600 значений этой переменной. Шаг все равно равен 10, так что это идеально
+int ELECHYST = EEPROM.read(9) * 10;  // В секундах!
+int GASHYST = EEPROM.read(10) * 10;  // В секундах!
+
 bool setFontByName(String name) {    //Функция для возможности устанавливать шрифт через консоль
   if (name == "SmallRusFont") tft.setFont(SmallRusFont);
   else if (name == "BigRusFont") tft.setFont(BigRusFont);
@@ -241,6 +245,8 @@ void log(String msg, bool copyToSerial = false, String type = "") {             
 
 #define HIDDEN true
 #define NO_LOG false
+
+int ignoreSmallDeviceTime = 61; // UNSET = 60
 
 void executeInConsole(String consoleMsg, bool hidden = false, bool logCommand = true) {                 //Функция для исполнения команды в консоли
   if (!hidden) {
@@ -392,11 +398,15 @@ void executeInConsole(String consoleMsg, bool hidden = false, bool logCommand = 
       else if (name == "chosenCauldron") {
         chosenCauldron = (value == "gas" ? GAS : ELECTRO);
         //console("value: " + value + "; bool expr: " + String((value == "gas" ? GAS : ELECTRO)));
+        setTimer(&ignoreSmallDeviceTime, 30);
+        Serial << "Таймер установлен на 30\n";
         EEPROM.update(1, chosenCauldron);
       }
       else if (name == "chosenMode") {
         chosenMode = (value == "auto" ? AUTO : MANUAL);
         //console("value: " + value + "; bool expr: " + String((value == "auto" ? AUTO : MANUAL)));
+        setTimer(&ignoreSmallDeviceTime, 30);
+        Serial << "Таймер установлен на 30\n";
         EEPROM.update(2, chosenMode);
       }
       else if (name == "offTemp") {
@@ -410,6 +420,16 @@ void executeInConsole(String consoleMsg, bool hidden = false, bool logCommand = 
       else if (name == "heatMode") {
         heatMode = (value == "auto" ? AUTOHEAT : (value == "gas" ? GASHEAT : (value == "electro" ? ELECTROHEAT : HEATOFF) ) );
         EEPROM.update(8, heatMode);
+      }
+      else if (name == "ELECHYST") {
+        ELECHYST = value.toInt();
+        EEPROM.update(9, ELECHYST / 10);    // Мы не можем хранить все 600 значений в одном байте, но т.к. шаг равен десяти, то все помещается.
+        Serial << "Записал:\nELECHYST: " << ELECHYST << "\n"; 
+      }
+      else if (name == "GASHYST") {
+        GASHYST = value.toInt();
+        EEPROM.update(10, GASHYST / 10);    // Мы не можем хранить все 600 значений в одном байте, но т.к. шаг равен десяти, то все помещается.
+        Serial << "Записал:\nGASHYST: " << GASHYST << "\n"; 
       }
       else if (name == "isConnectedToSmall") isConnectedToSmall = value.toInt();
       else if (name == "useThermometers") useThermometers = value.toInt();
@@ -572,27 +592,34 @@ int redHeatElecTimeHyst = UNSET;
 int ledBlinkTimer = UNSET;
 bool blinkingLeds[3], blinkingLedsState[3];
 
+// int ignoreSmallDeviceTime = UNSET;           Декларация перемещена наверх
+
 void updateTime() {
   t = now();
   if (t != tLast) {
     tLast = t;
+    int s = second();
     //Если время изменилось на секунду, то:
-    if (second() == 0) {      //Каждую новую минуту
+    if (s == 0) {      //Каждую новую минуту
       redrawTime();     //Рисовать новое текущее время в углу
       //      if (discTime >= 60) discTime -= 60;   //Т.к. время отсоединения - минута
-//      Serial << "Текущая секунда:" << second() << "\n";
+      //      Serial << "Текущая секунда:" << second() << "\n";
     }
 
-    if (second() % thermometersRefreshRate == 0) {    //Каждые thermometersRefreshRate секунд
+    if (s % thermometersRefreshRate == 0) {    //Каждые thermometersRefreshRate секунд
       if (useThermometers) updateTempData();     //Считывание температурных датчиков
     }
 
-    if (!isConnectedToSmall && second() % 5 == 0) {  //Каждые пять секунд, если не подключены к маленькому
+    /*if (!isConnectedToSmall && second() % 5 == 0) {  //Каждые пять секунд, если не подключены к маленькому
       Serial << "?" << endl;
       moduleSend("?*");
-    }
+      }*/
 
-    if (second() == discTime) {   //Если не было ответа какое-то время
+    if (s == ignoreSmallDeviceTime) {
+      ignoreSmallDeviceTime = UNSET;
+      Serial << "Сброс ignoreSmallDeviceTime;\n";
+    }
+    if (s == discTime) {   //Если не было ответа какое-то время
       //      Serial << second() << " " << discTime << endl;
       //      Serial << "Отсоединение\n";
       sendToSmallTime = UNSET;
@@ -600,26 +627,27 @@ void updateTime() {
       ignoreSmallDevice = true;
       discTime = UNSET;
     }
-    if (second() == sendToSmallTime) {
+    if (s == sendToSmallTime) {
       //      Serial << "Отправка\n";
       moduleSend("d*");
       moduleSend(String(1) + "*" + String(chosenCauldron) + "*" + String(chosenMode) + "*" + String(csystemState) + "*" + String(percents) + "*" + String(int(T[SETDOM] * 10)) + "*" + String(int(T[POD] * 10)) + "*" + String(sendTime()) + "*");
       sendToSmallTime = UNSET;
+      setTimer(&sendToSmallTime, 10);
     }
 
-    if (second() == elecCauldronTimeHyst) {
+    if (s == elecCauldronTimeHyst) {
       if (T[DOM] >= T[SETDOM]) elecCauldronTimeHyst = TRIGGERED;
       else
         elecCauldronTimeHyst = UNSET;         //Ставя его в UNSET, мы говорим программе поставить его еще раз, если это необходимо
     }
 
-    if (second() == redHeatElecTimeHyst) {
+    if (s == redHeatElecTimeHyst) {
       if (T[DOM] < T[SETDOM]) redHeatElecTimeHyst = TRIGGERED;
       else
         redHeatElecTimeHyst = UNSET;
     }
 
-    if (second() == ledBlinkTimer) {
+    if (s == ledBlinkTimer) {
       for (int i = 0; i < 3; i++) {
         if (blinkingLeds[i] == true) {
           switch (i) {
@@ -756,7 +784,7 @@ void updateMainScreen(bool redraw = false) {
   }
 }
 
-int menuSize = 6;
+int menuSize = 8;
 char* menuLines[] = {
   "Температура котла",
   "Выставить гистерезис",
@@ -764,6 +792,8 @@ char* menuLines[] = {
   //"Системное время",
   "Режим газового котла",
   "Температура отключения",
+  "Электро гистерезис",
+  "Газовый гистерезис",
   "Выход"
 };
 
@@ -802,7 +832,7 @@ void updateSelectedLine();
 void cycleValues(int val) {
   switch (selectedLine) {
     case 0:        //Температура котла
-      if ((T[SETPOD] > 40 || val == 1) && (T[SETPOD] < 70 || val == -1)) T[SETPOD] += val;
+      if ((T[SETPOD] > 35 || val == 1) && (T[SETPOD] < 70 || val == -1)) T[SETPOD] += val;
       break;
     case 1:        //Выставить гистерезис
       if ((hyst > 1 || val == 1) && (hyst < 10 || val == -1)) hyst += val;
@@ -818,6 +848,12 @@ void cycleValues(int val) {
       break;
     case 4:        //Температура отключения
       if ((offTemp > 15 || val == 1) && (offTemp < 20 || val == -1)) offTemp += val;
+      break;
+    case 5:        // Электро гистерезис
+      if ((ELECHYST > 10 || val == 1) && (ELECHYST < 600 || val == -1)) ELECHYST += val * 10;
+      break;
+    case 6:        // Газовый гистерезис
+      if ((GASHYST > 10 || val == 1) && (GASHYST < 600 || val == -1)) GASHYST += val * 10;
       break;
   }
   updateSelectedLine();
@@ -876,7 +912,13 @@ void updateSelectedLine() {
     case 4:        //Температура отключения
       printRus(tft, "        Ввод: " + String(offTemp) + "       ", CENTER, lineCoord);
       break;
-    case 5:        //Выход
+    case 5:        // Электро гистерезис
+      printRus(tft, "   Ввод: " + String(ELECHYST) + " с.   ", CENTER, lineCoord);
+      break;
+    case 6:        // Газовый гистерезис
+      printRus(tft, "   Ввод: " + String(GASHYST) + " с.   ", CENTER, lineCoord);
+      break;
+    default:        //Выход
       optionSelected = false;
       tft.setColor(VGA_GRAY);
       tft.fillRoundRect(59, 39, 421, 281);        //Рисуем скругленный для другого эффекта отрисовки
@@ -924,6 +966,12 @@ void encButtonPress() {         //Функция для обработки на�
         case 4:        //Температура отключения
           EEPROM.update(6, offTemp);
           break;
+        case 5:        // Электро гистерезис
+          EEPROM.update(9, ELECHYST / 10);      // В одном байте не поместить 600 значений, но так как шаг равен 10, мы сохраняем так
+          break;
+        case 6:        // Газовый гистерезис
+          EEPROM.update(10, GASHYST / 10);      // В одном байте не поместить 600 значений, но так как шаг равен 10, мы сохраняем так
+          break;
       }
 
       optionSelected = false;
@@ -934,7 +982,7 @@ void encButtonPress() {         //Функция для обработки на�
 
 #define FORCE_SKIP true
 
-int pulseTimeHyst = 6000; 
+int pulseTimeHyst = 6000;
 
 void switchCauldron() {
   makeBeep(75);   //Краткое пищание
@@ -1064,7 +1112,7 @@ void tweakPulse() {
       Serial << "Таймер пульса завершен" << endl;
     }
     else return;
-    
+
     for (int i = A7; i <= A12; i++) digitalWrite(i, LOW);
   }
   if (pulseTimeHyst != 0) printRus(tft, String("              "), 80, 170);
@@ -1084,7 +1132,9 @@ bool elecCauldronWorking = false;
 
 //#define FULL true   Декларация перемещена наверх
 //#define FORCE_SKIP true   Декларация перемещена наверх
-#define GASHYST 9000        //В (мс / 5) => это 45 секунд
+/*#define GASHYST 9000        //В (мс / 2) => это 45 секунд*/
+//int GASHYST = EEPROM.read(10);  // В секундах!      Декларация перемещена наверх
+
 String switchGasCauldron(bool state, bool isFull = false, bool forceSkip = false) {
   //if (millis() % 1000 < 5) Serial << "GAS: " << millis() << ": state = " << state << " isFull = " << isFull << " forceSkip = " << forceSkip << "\n";
   if (state) {
@@ -1126,7 +1176,7 @@ String switchGasCauldron(bool state, bool isFull = false, bool forceSkip = false
         printRus(tft, String("t = ") + String(gasTimeHyst / 200) + String(" "), 150, 170);
       }
 
-      if (gasTimeHyst >= GASHYST) {
+      if (gasTimeHyst >= GASHYST * 200) {
         gasTimeHyst = 0;
         Serial << "Таймер газа завершен" << endl;
         printRus(tft, String("      "), 150, 170);
@@ -1161,10 +1211,31 @@ String switchGasCauldron(bool state, bool isFull = false, bool forceSkip = false
 }
 
 #define LOCAL false
-#define ELECHYST 9000        //В (мс / 5) => это 45 секунд
+/*#define ELECHYST 9000        //В (мс / 2) => это 45 секунд*/
+//int ELECHYST = EEPROM.read(9); // В секундах!      Декларация перемещена наверх
+
 String switchElecCauldron(bool state, bool globalShutdown = true, bool forceSkip = false) {
   //if (millis() % 1000 < 5) Serial << "ELEC: " << millis() << ": state = " << state << " globalShutdown = " << globalShutdown << " forceSkip = " << forceSkip << "\n";
   if (state) {
+    if (!forceSkip && !elecCauldronWorking) {
+      elecTimeHyst++;
+      delay(5);
+
+      if (elecTimeHyst % 200 == 0) {
+        Serial << "Электро: прошла секунда таймера" << endl;
+        tft.setFont(BigRusFont);
+        tft.setColor(VGA_BLACK);
+        tft.setBackColor(VGA_GRAY);
+        printRus(tft, String("t = ") + String(elecTimeHyst / 200) + String(" "), 150, 170);
+      }
+
+      if (elecTimeHyst >= ELECHYST * 200) {
+        elecTimeHyst = 0;
+        Serial << "Таймер электро завершен" << endl;
+        printRus(tft, String("      "), 150, 170);
+      }
+      else return "waiting";
+    }
     isCompletelyTurnedOff = false;
     elecCauldronWorking = true;
     if (elecTimeHyst != 0) printRus(tft, String("      "), 150, 170);
@@ -1212,7 +1283,7 @@ String switchElecCauldron(bool state, bool globalShutdown = true, bool forceSkip
         printRus(tft, String("t = ") + String(elecTimeHyst / 200) + String(" "), 150, 170);
       }
 
-      if (elecTimeHyst >= ELECHYST) {
+      if (elecTimeHyst >= ELECHYST * 200) {
         elecTimeHyst = 0;
         Serial << "Таймер электро завершен" << endl;
         printRus(tft, String("      "), 150, 170);
@@ -1253,8 +1324,8 @@ String sendTime() {       //Старая функция для сборки ст
 }
 
 void setTimer(int *timer, int seconds) {
-  *timer = second() + seconds;
-  if (*timer >= 60) *timer -= 60;
+  *timer = (second() + seconds) % 60;
+  //if (*timer >= 60) *timer -= 60;
 }
 
 void moduleSend(String s) {
@@ -1294,19 +1365,31 @@ void checkSmallDevice() {
       if (msg == "!") {
         Serial << "!\n";
         isConnectedToSmall = true;
-        setTimer(&discTime, 15);
+        //        setTimer(&discTime, 15);
         break;
       }
       else {
-        if (!isConnectedToSmall) break;
+        //        if (!isConnectedToSmall) break;
         //Serial << "starcnt: " << starcnt << endl;
-        setTimer(&discTime, 5);
+        //        setTimer(&discTime, 5);
         bool updateTime = true;
         switch (starcnt) {
           case 1: if (useThermometers) T[DOM] = msg.toFloat() / 10; break;
           case 2: if (useThermometers) T[SETDOM] = msg.toFloat() / 10; break;
-          case 3: if (prevValues[1] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenCauldron," + String((msg.toInt() == GAS ? "gas" : "electro"))); break;
-          case 4: if (prevValues[2] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenMode," + String((msg.toInt() == AUTO ? "auto" : "manual"))); break;
+          case 3:
+            if (ignoreSmallDeviceTime != UNSET) {
+              Serial << "Breaking;\n";
+              break; 
+            }
+            if (prevValues[1] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenCauldron," + String((msg.toInt() == GAS ? "gas" : "electro"))); 
+            break;
+          case 4: 
+            if (ignoreSmallDeviceTime != UNSET) {
+              Serial << "Breaking;\n";
+              break; 
+            }
+            if (prevValues[2] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenMode," + String((msg.toInt() == AUTO ? "auto" : "manual"))); 
+            break;
           case 5: break;      //Просто игнорируем, осталось со старой системы
           case 6: break;      //Тоже самое
           case 7: break; //if (msg == "notupd") updateTime = false;
@@ -1317,9 +1400,9 @@ void checkSmallDevice() {
           //                Serial << "Данные получены" << endl;
           //Serial3 /*<< String(timeOfTheDay) <<*/ << 1 << "*" << chosenCauldron << "*" << chosenMode << "*" << csystemState << "*" /*<< String(percents) <<*/ << 0 << "*" << int(T[SETDOM] * 10) << "*" << int(T[POD] * 10) << "*" << sendTime() << "*";
           ignoreSmallDevice = false;
-          setTimer(&discTime, 20);
-  
-          setTimer(&sendToSmallTime, 3);
+          //          setTimer(&discTime, 20);
+
+          //          setTimer(&sendToSmallTime, 3);
         }
       }
     }
@@ -1353,7 +1436,7 @@ void useHeat(byte type, bool onlyCalc = false) {
       switchGasCauldron(false, FULL);
       switchElecCauldron(false, LOCAL);
     }
-     //else switchGasCauldron(false, FULL);
+    //else switchGasCauldron(false, FULL);
   }
   else if (type == AUTOHEAT)
     if (chosenCauldron == GAS) switchGasCauldron(true);
@@ -1382,20 +1465,21 @@ void setup() {
   Serial.begin(9600);
   //Serial1.begin(9600);
   //Serial3.begin(2400);    //"Маленькое" устройство
-  
+
   setSyncProvider(RTC.get);         //Автоматическая синхронизация с часами каждые пять минут
   Serial << "Добро пожаловать в CauldronContol от IZ-Software! (v" << V << ")\n\n";
   Serial << "Инициализация...\n";
 
   module.begin();     //"Маленькое" устройство
-  
+
   module.openWritingPipe(module_addresses[0]); // 1Node
   module.openReadingPipe(1, module_addresses[1]); // 2Node
-  module.setPALevel(RF24_PA_HIGH);
+  module.setPALevel(RF24_PA_LOW);
+  module.setChannel(50);
 
   module.startListening();
-  
-  Serial << "Радиомодуль "<< (module.isChipConnected() ? "подключен к шине" : "отключен от шины") << " SPI\n";
+
+  Serial << "Радиомодуль " << (module.isChipConnected() ? "подключен к шине" : "отключен от шины") << " SPI\n";
 
   pinMode(pin_A, INPUT);
   pinMode(pin_B, INPUT);
@@ -1492,6 +1576,11 @@ void setup() {
   else Serial << "Не удалось открыть файл для записи лога (" + LOG_NAME + ")\n";
   /*Инициализация SD карты завершена*/
 
+  setTimer(&sendToSmallTime, 10);
+
+  /*Проверка определенных переменных*/
+  Serial << "Считал:\nELECHYST: " << ELECHYST << " GASHYST: " << GASHYST << "\n"; 
+  /*Проверка завершена*/
 
   /*Начальная отрисовка*/
   updateMainScreen(REDRAW);         //Параметр REDRAW (true) сообщает, что нужно перерисовать все, несмотря на то, что все и так уже отрисовано
@@ -1574,13 +1663,13 @@ void loop() {
               Serial << "T[DOM] < T[SETDOM]\n";
               Serial << (T[POD] < T[SETPOD] - hyst) << " " << (T[POD] > T[SETPOD] + hyst) << endl;
               Serial << T[SETPOD] - hyst << " " << T[POD] << " " << T[SETPOD] + hyst << endl;
-            }*/
+              }*/
             if (T[POD] < T[SETPOD] - hyst) switchElecCauldron(true);
             else if (T[POD] > T[SETPOD] + hyst) switchElecCauldron(false, LOCAL);
           }
           else {
             switchElecCauldron(false);
-//            if (millis() % 500 < 5) Serial << "T[DOM] > T[SETDOM]\n";
+            //            if (millis() % 500 < 5) Serial << "T[DOM] > T[SETDOM]\n";
           }
         }
       }
