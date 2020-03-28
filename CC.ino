@@ -42,7 +42,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "3.1.0-beta";
+String V = "3.1.1-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -166,8 +166,8 @@ int gasMode = EEPROM.read(7);    //prevValues[7]
 int heatMode = EEPROM.read(8);
 
 // Мы совершаем умножение на десять, так как не можем хранить все 600 значений этой переменной. Шаг все равно равен 10, так что это идеально
-int ELECHYST = EEPROM.read(9) * 10;  // В секундах!
-int GASHYST = EEPROM.read(10) * 10;  // В секундах!
+unsigned long ELECHYST = EEPROM.read(9) * 10;  // В секундах!
+unsigned long GASHYST = EEPROM.read(10) * 10;  // В секундах!
 
 bool setFontByName(String name) {    //Функция для возможности устанавливать шрифт через консоль
   if (name == "SmallRusFont") tft.setFont(SmallRusFont);
@@ -424,12 +424,12 @@ void executeInConsole(String consoleMsg, bool hidden = false, bool logCommand = 
       else if (name == "ELECHYST") {
         ELECHYST = value.toInt();
         EEPROM.update(9, ELECHYST / 10);    // Мы не можем хранить все 600 значений в одном байте, но т.к. шаг равен десяти, то все помещается.
-        Serial << "Записал:\nELECHYST: " << ELECHYST << "\n"; 
+        Serial << "Записал:\nELECHYST: " << ELECHYST << "\n";
       }
       else if (name == "GASHYST") {
         GASHYST = value.toInt();
         EEPROM.update(10, GASHYST / 10);    // Мы не можем хранить все 600 значений в одном байте, но т.к. шаг равен десяти, то все помещается.
-        Serial << "Записал:\nGASHYST: " << GASHYST << "\n"; 
+        Serial << "Записал:\nGASHYST: " << GASHYST << "\n";
       }
       else if (name == "isConnectedToSmall") isConnectedToSmall = value.toInt();
       else if (name == "useThermometers") useThermometers = value.toInt();
@@ -1232,7 +1232,7 @@ String switchElecCauldron(bool state, bool globalShutdown = true, bool forceSkip
       if (elecTimeHyst >= ELECHYST * 200) {
         elecTimeHyst = 0;
         Serial << "Таймер электро завершен" << endl;
-        printRus(tft, String("      "), 150, 170);
+        printRus(tft, String("        "), 150, 170);
       }
       else return "waiting";
     }
@@ -1379,16 +1379,16 @@ void checkSmallDevice() {
           case 3:
             if (ignoreSmallDeviceTime != UNSET) {
               Serial << "Breaking;\n";
-              break; 
+              break;
             }
-            if (prevValues[1] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenCauldron," + String((msg.toInt() == GAS ? "gas" : "electro"))); 
+            if (prevValues[1] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenCauldron," + String((msg.toInt() == GAS ? "gas" : "electro")));
             break;
-          case 4: 
+          case 4:
             if (ignoreSmallDeviceTime != UNSET) {
               Serial << "Breaking;\n";
-              break; 
+              break;
             }
-            if (prevValues[2] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenMode," + String((msg.toInt() == AUTO ? "auto" : "manual"))); 
+            if (prevValues[2] != msg.toInt() && !ignoreSmallDevice) executeInConsole("changeValue chosenMode," + String((msg.toInt() == AUTO ? "auto" : "manual")));
             break;
           case 5: break;      //Просто игнорируем, осталось со старой системы
           case 6: break;      //Тоже самое
@@ -1579,7 +1579,7 @@ void setup() {
   setTimer(&sendToSmallTime, 10);
 
   /*Проверка определенных переменных*/
-  Serial << "Считал:\nELECHYST: " << ELECHYST << " GASHYST: " << GASHYST << "\n"; 
+  Serial << "Считал:\nELECHYST: " << ELECHYST << " GASHYST: " << GASHYST << "\n";
   /*Проверка завершена*/
 
   /*Начальная отрисовка*/
@@ -1589,6 +1589,46 @@ void setup() {
 
   Serial << "\nФункция Setup завершена!\n\n";
   console("Введите \"help\" для списка команд");
+}
+
+// Used for timer in the main loop for electro cauldron
+bool tPodWasLess = false;
+int elecTimeLoopHyst = 0;
+bool waitForElecLoopTimer() {
+  /*elecTimeLoopHyst++;
+  delay(5);
+
+  if (elecTimeLoopHyst % 200 == 0) {
+    Serial << "Электро LOOP: прошла секунда таймера" << endl;
+    tft.setFont(BigRusFont);
+    tft.setColor(VGA_BLACK);
+    tft.setBackColor(VGA_GRAY);
+    printRus(tft, String("t(L) = ") + String(elecTimeLoopHyst / 200) + String(" "), 150, 170);
+  }
+
+  Serial << "GASHYST: " << GASHYST << endl;
+  Serial << "Condition: " << (elecTimeLoopHyst >= ELECHYST * 200) << endl;
+  Serial << "elecTimeLoopHyst: " << elecTimeLoopHyst << endl;
+  Serial << "ELECHYST: " << ELECHYST << endl;
+  Serial << "ELECHYST * 200: " << ELECHYST * 200 << endl;
+  Serial << "ELECHYST * 2: " << ELECHYST * 2 << endl;
+  Serial << "ELECHYST + 200: " << ELECHYST + 200 << endl;
+  Serial << "ELECHYST - 200: " << ELECHYST - 200 << endl;
+  Serial << "ELECHYST - 300: " << ELECHYST - 300 << endl;
+  Serial << "ELECHYST / 300: " << ELECHYST / 300 << endl;
+
+  for (int i = 0; i <= 200; i++) {
+    Serial << "ELECHYST * " << i << ": " << ELECHYST * i << endl;
+  }
+  if (elecTimeLoopHyst >= ELECHYST * 200) {
+    elecTimeLoopHyst = 0;
+    Serial << "Таймер электро завершен (LOOP)" << endl;
+    printRus(tft, String("      "), 150, 170);
+  }
+  else return false;
+
+  return true;*/
+  return true;
 }
 
 void loop() {
@@ -1664,8 +1704,26 @@ void loop() {
               Serial << (T[POD] < T[SETPOD] - hyst) << " " << (T[POD] > T[SETPOD] + hyst) << endl;
               Serial << T[SETPOD] - hyst << " " << T[POD] << " " << T[SETPOD] + hyst << endl;
               }*/
-            if (T[POD] < T[SETPOD] - hyst) switchElecCauldron(true);
-            else if (T[POD] > T[SETPOD] + hyst) switchElecCauldron(false, LOCAL);
+            if (T[POD] < T[SETPOD] - hyst) {
+              if (!tPodWasLess && !waitForElecLoopTimer()) {
+                ;
+                // Do nothing
+              }
+              else {
+                tPodWasLess = true;
+                switchElecCauldron(true);
+              }
+            }
+            else if (T[POD] > T[SETPOD] + hyst) {
+              if (tPodWasLess && !waitForElecLoopTimer()) {
+                ;
+                // Do nothing
+              }
+              else {
+                tPodWasLess = false;
+                switchElecCauldron(false, LOCAL);
+              }
+            }
           }
           else {
             switchElecCauldron(false);
@@ -1765,9 +1823,9 @@ void loop() {
   else {
     bool leds[] = {false, true, false};     //Зеленый
     useLeds(leds);
-    if (csystemState != INACTIVE) {
+//    if (csystemState != INACTIVE) {
       switchElecCauldron(false);
       switchGasCauldron(false, FULL);
-    }
+//    }
   }
 }
