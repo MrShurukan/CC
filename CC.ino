@@ -42,7 +42,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "3.1.1-beta";
+String V = "3.1.2-beta";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -225,6 +225,24 @@ void openLogFile(int type = FILE_READ) {
   delay(1000);
 }
 
+void changeSystemTime(int nHour, int nMinute, int nSecond = second(), int nDay = day(), int nMonth = month(), int nYear = 20) {
+  //Записываем в tm переменную
+  tm.Year = y2kYearToTm(nYear);
+  tm.Month = nMonth;
+  tm.Day = nDay;
+  tm.Hour = nHour;
+  tm.Minute = nMinute;
+  tm.Second = nSecond;
+  t = makeTime(tm);
+  //Выставляем время
+  if (RTC.set(t) == 0) { //Успешно
+    setTime(t);
+    console("Время было выставлено успешно!");
+    //executeInConsole("printTime", HIDDEN);
+  }
+  else console("Не удалось выставить время!");
+}
+
 #define WITH_SERIAL true
 #define NO_SERIAL false
 //Типы сообщений в LOG
@@ -318,6 +336,7 @@ void executeInConsole(String consoleMsg, bool hidden = false, bool logCommand = 
       log(consoleMsg, NO_SERIAL, "User: ");
     }
     else if (firstWord == "setTime") {                                          /*setTime*/
+      // ГГ,Мес,Д,Ч,М,С
       int date[6];          //Массив для хранения всей даты
       String num = "";           //Цифры, которые мы будем один за одним добавлять, чтобы создавать число
       //Разбиваем строку на отдельные int элементы
@@ -329,21 +348,10 @@ void executeInConsole(String consoleMsg, bool hidden = false, bool logCommand = 
           num = "";
         }
       }
-      //Записываем в tm переменную
-      tm.Year = y2kYearToTm(date[0]);
-      tm.Month = date[1];
-      tm.Day = date[2];
-      tm.Hour = date[3];
-      tm.Minute = date[4];
-      tm.Second = date[5];
-      t = makeTime(tm);
-      //Выставляем время
-      if (RTC.set(t) == 0) { //Успешно
-        setTime(t);
-        console("Время было выставлено успешно!");
-        executeInConsole("printTime", HIDDEN);
-      }
-      else console("Не удалось выставить время!");
+
+      // Ч,М,С,Д,Мес,Г
+      changeSystemTime(date[3], date[4], date[5], date[2], date[1], date[0]);
+      executeInConsole("printTime", HIDDEN);
     }
     else if (firstWord == "selectFont") {                                       /*selectFont*/
       bool b = setFontByName(consoleMsg);
@@ -784,12 +792,12 @@ void updateMainScreen(bool redraw = false) {
   }
 }
 
-int menuSize = 8;
+int menuSize = 9;
 char* menuLines[] = {
   "Температура котла",
   "Выставить гистерезис",
   "Выбрать подогрев",
-  //"Системное время",
+  "Системное время",
   "Режим газового котла",
   "Температура отключения",
   "Электро гистерезис",
@@ -829,6 +837,16 @@ void updateMenu(bool redraw = false, int dir = 0) {
 bool inMenu = false;
 void updateSelectedLine();
 
+// Переменные для времени в меню
+int menuHour = -1;
+int menuMinute = -1;
+enum {
+  CHANGING_HOURS,
+  CHANGING_MINUTES,
+  NONE
+} editTimeMode = NONE;
+
+
 void cycleValues(int val) {
   switch (selectedLine) {
     case 0:        //Температура котла
@@ -840,19 +858,32 @@ void cycleValues(int val) {
     case 2:        //Выбрать подогрев
       if ((heatMode > 0 || val == 1) && (heatMode < 3 || val == -1)) heatMode += val;
       break;
-    /*case 3:        //Системное время
-      printRus(tft, "       Ввод: " + String(hyst) + "      ", CENTER, lineCoord);
-      break;*/
-    case 3:        //Режим газового котла
+    case 3:        //Системное время
+      switch (editTimeMode) {
+        case CHANGING_HOURS:
+          menuHour += val;
+          
+          if (menuHour >= 24) menuHour = 0;
+          if (menuHour < 0) menuHour = 23;
+          break;
+        case CHANGING_MINUTES:
+          menuMinute += val;
+
+          if (menuMinute >= 60) menuMinute = 0;
+          if (menuMinute < 0) menuMinute = 59; 
+          break;
+      }
+      break;
+    case 4:        //Режим газового котла
       if ((gasMode > 0 || val == 1) && (gasMode < 1 || val == -1)) gasMode += val;
       break;
-    case 4:        //Температура отключения
+    case 5:        //Температура отключения
       if ((offTemp > 15 || val == 1) && (offTemp < 20 || val == -1)) offTemp += val;
       break;
-    case 5:        // Электро гистерезис
+    case 6:        // Электро гистерезис
       if ((ELECHYST > 10 || val == 1) && (ELECHYST < 600 || val == -1)) ELECHYST += val * 10;
       break;
-    case 6:        // Газовый гистерезис
+    case 7:        // Газовый гистерезис
       if ((GASHYST > 10 || val == 1) && (GASHYST < 600 || val == -1)) GASHYST += val * 10;
       break;
   }
@@ -903,19 +934,19 @@ void updateSelectedLine() {
     case 2:        //Выбрать подогрев
       printRus(tft, "   Ввод: " + String((heatMode == AUTOHEAT ? "АВТО " : (heatMode == GASHEAT ? " ГАЗ " : (heatMode == ELECTROHEAT ? "ЭЛЕКТ" : "Выкл.") ) )) + "  ", CENTER, lineCoord);
       break;
-    /*case 3:        //Системное время
-      printRus(tft, "       Ввод: " + String(hyst) + "      ", CENTER, lineCoord);
-      break;*/
-    case 3:        //Режим газового котла
+    case 3:        //Системное время
+      printRus(tft, "       " + formatValue(menuHour) + ":" + formatValue(menuMinute) + "      ", CENTER, lineCoord);
+      break;
+    case 4:        //Режим газового котла
       printRus(tft, "     Ввод: " + String((gasMode == HYST ? "HYST " : "PULSE")) + "    ", CENTER, lineCoord);
       break;
-    case 4:        //Температура отключения
+    case 5:        //Температура отключения
       printRus(tft, "        Ввод: " + String(offTemp) + "       ", CENTER, lineCoord);
       break;
-    case 5:        // Электро гистерезис
+    case 6:        // Электро гистерезис
       printRus(tft, "   Ввод: " + String(ELECHYST) + " с.   ", CENTER, lineCoord);
       break;
-    case 6:        // Газовый гистерезис
+    case 7:        // Газовый гистерезис
       printRus(tft, "   Ввод: " + String(GASHYST) + " с.   ", CENTER, lineCoord);
       break;
     default:        //Выход
@@ -937,44 +968,66 @@ void encButtonPress() {         //Функция для обработки на�
     updateMenu();      //Закрасим последнюю строчку, как выбранную
     mainScreenUpdates = false;
 
+    menuHour = hour();
+    menuMinute = minute();
+
     inMenu = true;
   }
-  else {                        //Выходим из меню
+  else {                        //Выходим из меню / Находимся внутри и меняем настройки
     if (!optionSelected) {      //Если еще не было выбрано строки в меню
       optionSelected = true;
       updateSelectedLine();
+
+      if (selectedLine == 3) editTimeMode = CHANGING_HOURS;   // Системное время
     }
     else {
-      updateMenu();
-      //Сохранение в EEPROM
-      switch (selectedLine) {
-        case 0:        //Температура котла
-          EEPROM.update(3, T[SETPOD]);
-          break;
-        case 1:        //Выставить гистерезис
-          EEPROM.update(0, hyst);
-          break;
-        case 2:        //Выбрать подогрев
-          EEPROM.update(8, heatMode);
-          break;
-        /*case 3:        //Системное время
-          printRus(tft, "       Ввод: " + String(hyst) + "      ", CENTER, lineCoord);
-          break;*/
-        case 3:        //Режим газового котла
-          EEPROM.update(7, gasMode);
-          break;
-        case 4:        //Температура отключения
-          EEPROM.update(6, offTemp);
-          break;
-        case 5:        // Электро гистерезис
-          EEPROM.update(9, ELECHYST / 10);      // В одном байте не поместить 600 значений, но так как шаг равен 10, мы сохраняем так
-          break;
-        case 6:        // Газовый гистерезис
-          EEPROM.update(10, GASHYST / 10);      // В одном байте не поместить 600 значений, но так как шаг равен 10, мы сохраняем так
-          break;
+      if (selectedLine == 3) {    // Системное время
+        switch (editTimeMode) {
+          case CHANGING_HOURS:
+            editTimeMode = CHANGING_MINUTES;
+            break;
+          case CHANGING_MINUTES:
+            editTimeMode = NONE;
+            changeSystemTime(menuHour, menuMinute, 0);
+            
+            updateMenu(); 
+            optionSelected = false;
+            break;
+        }
       }
-
-      optionSelected = false;
+      else {
+        updateMenu();
+        
+        //Сохранение в EEPROM
+        switch (selectedLine) {
+          case 0:        //Температура котла
+            EEPROM.update(3, T[SETPOD]);
+            break;
+          case 1:        //Выставить гистерезис
+            EEPROM.update(0, hyst);
+            break;
+          case 2:        //Выбрать подогрев
+            EEPROM.update(8, heatMode);
+            break;
+          case 3:        //Системное время
+            //printRus(tft, "       Ввод: " + String(hyst) + "      ", CENTER, lineCoord);
+            break;
+          case 4:        //Режим газового котла
+            EEPROM.update(7, gasMode);
+            break;
+          case 5:        //Температура отключения
+            EEPROM.update(6, offTemp);
+            break;
+          case 6:        // Электро гистерезис
+            EEPROM.update(9, ELECHYST / 10);      // В одном байте не поместить 600 значений, но так как шаг равен 10, мы сохраняем так
+            break;
+          case 7:        // Газовый гистерезис
+            EEPROM.update(10, GASHYST / 10);      // В одном байте не поместить 600 значений, но так как шаг равен 10, мы сохраняем так
+            break;
+        }
+  
+        optionSelected = false;
+      }
     }
   }
   delay(50);    //Для того, чтобы убрать дребезг
@@ -1173,13 +1226,15 @@ String switchGasCauldron(bool state, bool isFull = false, bool forceSkip = false
         tft.setFont(BigRusFont);
         tft.setColor(VGA_BLACK);
         tft.setBackColor(VGA_GRAY);
-        printRus(tft, String("t = ") + String(gasTimeHyst / 200) + String(" "), 150, 170);
+        if (!inMenu)
+          printRus(tft, String("t = ") + String(gasTimeHyst / 200) + String(" "), 150, 170);
       }
 
       if (gasTimeHyst >= GASHYST * 200) {
         gasTimeHyst = 0;
         Serial << "Таймер газа завершен" << endl;
-        printRus(tft, String("      "), 150, 170);
+        if (!inMenu)
+          printRus(tft, String("      "), 150, 170);
       }
       else return "waiting";
     }
@@ -1676,7 +1731,7 @@ void loop() {
           if (activeHeat == GREENHEAT) T[SETPOD] = 65.0;
           else calcAutoTemp();
 
-          if (T[DOM] < T[SETDOM]) {
+          if (T[DOM] < T[SETDOM] || activeHeat == HEATOFF) {
             if (T[POD] < T[SETPOD] - hyst || gasMode == PULSE) switchGasCauldron(true);
             else if (T[POD] > T[SETPOD] + hyst) switchGasCauldron(false);
           }
@@ -1698,7 +1753,7 @@ void loop() {
           if (activeHeat == GREENHEAT) T[SETPOD] = 65.0;
           else calcAutoTemp();
 
-          if (T[DOM] < T[SETDOM]) {
+          if (T[DOM] < T[SETDOM] || activeHeat == HEATOFF) {
             /*if (millis() % 500 < 5) {
               Serial << "T[DOM] < T[SETDOM]\n";
               Serial << (T[POD] < T[SETPOD] - hyst) << " " << (T[POD] > T[SETPOD] + hyst) << endl;
