@@ -42,7 +42,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "1.0.1-release";
+String V = "1.0.2-release";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -584,6 +584,12 @@ void checkESPInput() {
     }
     else if (serialMsg == "resetBoard") {
       resetFunc();
+    }
+    else if (serialMsg == "switchCauldron") {
+      switchCauldron();
+    }
+    else if (serialMsg == "switchCauldronMode") {
+      switchCauldronMode();
     }
 
     serialMsg = "";

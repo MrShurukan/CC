@@ -138,6 +138,12 @@ void loop() {
         webSocketClient.sendData("disconnect");
         ESP.reset();
       }
+      else if (buff == "switchCauldron") {
+        msgMainDevice("switchCauldron");
+      }
+      else if (buff == "switchCauldronMode") {
+        msgMainDevice("switchCauldronMode");
+      }
     }
   }
   // Если соединение было разорвано, нужно переподключиться
