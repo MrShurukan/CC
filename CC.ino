@@ -42,7 +42,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "3.1.2-beta";
+String V = "1.0.0-release";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -139,7 +139,8 @@ int hyst = EEPROM.read(0);  //prevValues[0]
 #define MANUAL 0
 int chosenCauldron = EEPROM.read(1); //prevValues[1]
 int chosenMode = EEPROM.read(2); //prevValues[2]
-//Переменная для хранении данных о состоянии подключения к "маленькому" устройству
+// Переменная для хранении данных о состоянии подключения к "маленькому" устройству
+// EDIT: Теперь эта переменная переназначается, чтобы означать подключение ESP к интернету
 bool isConnectedToSmall; //prevValues[3]
 
 //Текущий Heat
@@ -225,7 +226,7 @@ void openLogFile(int type = FILE_READ) {
   delay(1000);
 }
 
-void changeSystemTime(int nHour, int nMinute, int nSecond = second(), int nDay = day(), int nMonth = month(), int nYear = 20) {
+void changeSystemTime(int nHour, int nMinute, int nSecond = 0, int nDay = 1, int nMonth = 1, int nYear = 20) {
   //Записываем в tm переменную
   tm.Year = y2kYearToTm(nYear);
   tm.Month = nMonth;
@@ -532,11 +533,15 @@ void serialCommand(String command) {
 void sendTempCauldronData() {
   String data = String(T[POD], 1) + "," + String(T[SETPOD], 0) + "," + String(T[OBR], 1) + "," + String(T[TPOL], 1) + "," + String(T[UL], 1) + "," + String(T[DOM], 1) + "," + String(T[SETDOM], 1) + "," +
                 String((chosenCauldron == GAS ? "gas" : "electro")) + "," + String((chosenMode == AUTO ? "auto" : "manual")) + "," + String(hyst);
-  Serial1 << "tempAndCauldronData`" << data;
+  serialCommand("systemData`" + data);
 }
+
+// Функция софт-ресета платы
+void(* resetFunc) (void) = 0;
 
 void checkESPInput() {
   while (Serial1.available()) {
+//    Serial << "Читаю с Serial1\n";
     char c = Serial1.read();
     if (c != '*') serialMsg += c;
     else break;
@@ -554,6 +559,12 @@ void checkESPInput() {
       consoleHooked = false;
       log("Консоль была подключена назад", WITH_SERIAL, CONSOLE);              //Отправляем сообщение еще раз, на этот раз уже в Serial
     }
+    else if (serialMsg == "connected") {
+      isConnectedToSmall = true;
+    }
+    else if (serialMsg == "disconnected") {
+      isConnectedToSmall = false;
+    }
     else if (serialMsg.indexOf("Console ") != -1) {                //Если сообщение - консольный запрос (содержит слово Console внутри)
       serialMsg = serialMsg.substring(serialMsg.indexOf(' ') + 1); //Удаляем слово Console и пробел после него из сообщения
       executeInConsole(serialMsg);
@@ -567,6 +578,9 @@ void checkESPInput() {
 
       executeInConsole("changeValue tsetdom," + serialMsg);
       moduleSend("setDom`" + serialMsg + "*");
+    }
+    else if (serialMsg == "resetBoard") {
+      resetFunc();
     }
 
     serialMsg = "";
@@ -631,7 +645,7 @@ void updateTime() {
       //      Serial << second() << " " << discTime << endl;
       //      Serial << "Отсоединение\n";
       sendToSmallTime = UNSET;
-      isConnectedToSmall = false;
+      // isConnectedToSmall = false;  // Закомментировано, потому что переменная получает переназначение (см. декларацию)
       ignoreSmallDevice = true;
       discTime = UNSET;
     }
@@ -1419,7 +1433,7 @@ void checkSmallDevice() {
       message = message.substring(len + 1);
       if (msg == "!") {
         Serial << "!\n";
-        isConnectedToSmall = true;
+        // isConnectedToSmall = true;   // Переменная получила переназначение, см. декларацию
         //        setTimer(&discTime, 15);
         break;
       }
@@ -1518,7 +1532,7 @@ void calcAutoTemp() {
 void setup() {
   /*Дефолтная инициализация*/
   Serial.begin(9600);
-  //Serial1.begin(9600);
+  Serial1.begin(9600);
   //Serial3.begin(2400);    //"Маленькое" устройство
 
   setSyncProvider(RTC.get);         //Автоматическая синхронизация с часами каждые пять минут
@@ -1710,8 +1724,10 @@ void loop() {
       activeHeat = GREENHEAT;  //Зеленый Heat
       //T[SETPOD] = 65.0;          //Чтобы проверки были корректной, если пришло время heat-ов
     }
-    else if ((activeHeat == REDHEAT && T[UL] > 10.1 || heatMode == HEATOFF || T[DOM] < T[SETDOM]) || activeHeat == GREENHEAT) {
+    else if (((activeHeat == REDHEAT && T[UL] > 10.1 || heatMode == HEATOFF || T[DOM] < T[SETDOM]) || activeHeat == GREENHEAT) && activeHeat != HEATOFF) {
       activeHeat = HEATOFF; //Отключение heat-ов
+      switchElecCauldron(false);
+      switchGasCauldron(false, FULL);
       //if (chosenMode == AUTO) calcAutoTemp();
     }
 
@@ -1731,7 +1747,7 @@ void loop() {
           if (activeHeat == GREENHEAT) T[SETPOD] = 65.0;
           else calcAutoTemp();
 
-          if (T[DOM] < T[SETDOM] || activeHeat == HEATOFF) {
+          if (T[DOM] < T[SETDOM]) {
             if (T[POD] < T[SETPOD] - hyst || gasMode == PULSE) switchGasCauldron(true);
             else if (T[POD] > T[SETPOD] + hyst) switchGasCauldron(false);
           }
@@ -1753,7 +1769,7 @@ void loop() {
           if (activeHeat == GREENHEAT) T[SETPOD] = 65.0;
           else calcAutoTemp();
 
-          if (T[DOM] < T[SETDOM] || activeHeat == HEATOFF) {
+          if (T[DOM] < T[SETDOM]) {
             /*if (millis() % 500 < 5) {
               Serial << "T[DOM] < T[SETDOM]\n";
               Serial << (T[POD] < T[SETPOD] - hyst) << " " << (T[POD] > T[SETPOD] + hyst) << endl;

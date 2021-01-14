@@ -2,7 +2,7 @@
 #include <Streaming.h>
 #include <SoftwareSerial.h>
 
-SoftwareSerial mySerial(5, 4, false, 256); // RX, TX (1, 2)
+SoftwareSerial mySerial(5, 4, false); // RX, TX (1, 2)
 
 #define led 13
 
