@@ -42,7 +42,7 @@ unsigned char addresses[4][8];
 
 #include "RussianFontsRequiredFunctions.h"
 
-String V = "1.0.0-release";
+String V = "1.0.1-release";
 
 /*
     CC (Cauldron Control) - Это система по управлению котлами на Arduino Mega 2560 с использованием UTFT экрана для визуализации и помощи пользователю в ориентировании
@@ -50,6 +50,7 @@ String V = "1.0.0-release";
 
     Создано Ильей Завьяловым (ilyuzhaz@gmail.com), начало разработки: 27.07.2017
 
+    Релиз: 14.01.2021
     Конец разработки: Все еще в разработке :D
 
 
@@ -531,9 +532,11 @@ void serialCommand(String command) {
 }
 
 void sendTempCauldronData() {
+  String s_activeHeat = (activeHeat == HEATOFF ? "off" : (activeHeat == GREENHEAT ? "green" : "red"));
+  String s_csystemState = (csystemState == INACTIVE ? "inac" : "act");
   String data = String(T[POD], 1) + "," + String(T[SETPOD], 0) + "," + String(T[OBR], 1) + "," + String(T[TPOL], 1) + "," + String(T[UL], 1) + "," + String(T[DOM], 1) + "," + String(T[SETDOM], 1) + "," +
-                String((chosenCauldron == GAS ? "gas" : "electro")) + "," + String((chosenMode == AUTO ? "auto" : "manual")) + "," + String(hyst);
-  serialCommand("systemData`" + data);
+                String((chosenCauldron == GAS ? "gas" : "electro")) + "," + String((chosenMode == AUTO ? "auto" : "manual")) + "," + String(hyst) + "," + s_activeHeat + "," + s_csystemState;
+  serialCommand("`" + data);
 }
 
 // Функция софт-ресета платы

@@ -70,6 +70,9 @@ void setup() {
 
 String buff = "";
 
+// Счетчик, который проверяет если устройство вовремя отвечает
+int timeoutCounter = -1;
+const int loopDelay = 50;
 void loop() {
   // Чтение данных с Serial
   if (parse(Serial, buff)) {
@@ -95,8 +98,9 @@ void loop() {
     Serial << "<" << buff << ">\n";
 
     // Если устройство прислало нам информацию о котле - отправить её на сервер
-    if (buff.startsWith("systemData`")) {
+    if (buff.startsWith("`")) {
       webSocketClient.sendData(buff);
+      timeoutCounter = -1;
     }
   }
 
@@ -116,7 +120,10 @@ void loop() {
         webSocketClient.sendData("pong");
       }*/
       if (buff == "requestData") {
+        webSocketClient.sendData("ok");
         msgMainDevice("requestData");
+        // Ставим timeout таймер на 2 секунды
+        if (timeoutCounter == -1) timeoutCounter = 2000 / loopDelay;
       }
       // Просьба сервера отправить что-то на основное устройство
       else if (buff.startsWith("send ")) {
@@ -145,6 +152,16 @@ void loop() {
     Serial << "Нет соединения, переподключаюсь...\n"; 
     wsconnect();
   }
+
+  if (timeoutCounter > 0) {
+    timeoutCounter--;
+    // Serial << timeoutCounter << '\n';
+  }
+  else if (timeoutCounter == 0) {
+    webSocketClient.sendData("mainDeviceDoesntRespond");
+    timeoutCounter = -2;
+  }
+  delay(loopDelay);
 }
 
 /* *** Вспомогательные функции *** */
